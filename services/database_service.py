@@ -6,10 +6,11 @@
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
-from models.database import Exercise, UserGoal, WorkoutPlan, WorkoutSession, WorkoutExercise, UserFeedback
+from models.database import Exercise, UserGoal, WorkoutPlan, WorkoutSession, WorkoutExercise, UserFeedback, DailyLog, LogExercise
 from models.schemas import (
     ExerciseCreate, UserGoalCreate, WorkoutPlanCreate, 
-    UserFeedbackCreate, RecommendationRequest
+    UserFeedbackCreate, RecommendationRequest,
+    DailyLogCreate, DailyLogUpdate, LogExerciseCreate, LogExerciseUpdate
 )
 
 

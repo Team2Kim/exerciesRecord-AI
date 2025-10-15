@@ -125,6 +125,37 @@ class UserFeedback(Base):
     exercise = relationship("Exercise")
 
 
+class DailyLog(Base):
+    """운동 일지 테이블"""
+    __tablename__ = "daily_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(50), nullable=False, index=True)
+    date = Column(String(10), nullable=False, index=True)  # yyyy-MM-dd 형식
+    memo = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 관계 설정
+    log_exercises = relationship("LogExercise", back_populates="daily_log", cascade="all, delete-orphan")
+
+
+class LogExercise(Base):
+    """일지에 기록된 운동 항목"""
+    __tablename__ = "log_exercises"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    daily_log_id = Column(Integer, ForeignKey("daily_logs.id"), nullable=False)
+    exercise_id = Column(Integer, ForeignKey("exercises.id"), nullable=False)
+    intensity = Column(String(10), nullable=False)  # 상, 중, 하
+    exercise_time = Column(Integer, nullable=False)  # 운동 시간 (분)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # 관계 설정
+    daily_log = relationship("DailyLog", back_populates="log_exercises")
+    exercise = relationship("Exercise")
+
+
 # 관계 역방향 설정
 UserGoal.workout_plans = relationship("WorkoutPlan", back_populates="user_goal")
 

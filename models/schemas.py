@@ -251,3 +251,111 @@ class HealthStatus(BaseModel):
     total_users: int
     version: str = "1.0.0"
     uptime: str
+
+
+# ==================== DailyLog 스키마 ====================
+
+class LogExerciseBase(BaseModel):
+    """일지 운동 기본 스키마"""
+    exercise_id: int
+    intensity: str  # 상, 중, 하
+    exercise_time: int  # 분
+
+
+class LogExerciseCreate(LogExerciseBase):
+    """일지 운동 생성 스키마"""
+    pass
+
+
+class LogExerciseUpdate(BaseModel):
+    """일지 운동 수정 스키마"""
+    intensity: Optional[str] = None
+    exercise_time: Optional[int] = None
+
+
+class LogExerciseResponse(BaseModel):
+    """일지 운동 응답 스키마"""
+    log_exercise_id: int
+    intensity: str
+    exercise_time: int
+    exercise: Exercise
+    
+    class Config:
+        from_attributes = True
+
+
+class DailyLogCreate(BaseModel):
+    """일지 생성 스키마"""
+    date: str  # yyyy-MM-dd 형식
+    memo: Optional[str] = None
+
+
+class DailyLogUpdate(BaseModel):
+    """일지 수정 스키마"""
+    memo: Optional[str] = None
+
+
+class DailyLogResponse(BaseModel):
+    """일지 응답 스키마"""
+    log_id: int
+    date: str
+    memo: Optional[str]
+    exercises: List[LogExerciseResponse] = []
+    
+    class Config:
+        from_attributes = True
+
+
+# ==================== 운동 분석 스키마 ====================
+
+class BodyPartAnalysis(BaseModel):
+    """신체 부위별 분석"""
+    body_part: str
+    exercise_count: int  # 운동 횟수
+    total_time: int  # 총 운동 시간 (분)
+    percentage: float  # 전체 대비 비율
+    exercises: List[str]  # 주로 한 운동 목록
+
+
+class WorkoutPatternAnalysis(BaseModel):
+    """운동 패턴 분석 결과"""
+    period_days: int  # 분석 기간 (일)
+    total_workouts: int  # 총 운동 횟수
+    total_exercises: int  # 총 운동 개수
+    total_time: int  # 총 운동 시간
+    avg_workout_time: float  # 평균 운동 시간
+    
+    # 신체 부위별 분석
+    body_part_distribution: List[BodyPartAnalysis]
+    
+    # 가장 많이 한 운동
+    most_frequent_exercises: List[dict]  # {name, count, body_part}
+    
+    # 운동 강도 분포
+    intensity_distribution: dict  # {상: count, 중: count, 하: count}
+
+
+class WorkoutInsight(BaseModel):
+    """운동 인사이트 및 추천"""
+    # 과사용 부위 (휴식 필요)
+    overworked_parts: List[str]
+    
+    # 부족한 부위 (보충 필요)
+    underworked_parts: List[str]
+    
+    # 균형 점수 (0-100)
+    balance_score: float
+    
+    # 추천 사항
+    recommendations: List[str]
+    
+    # 주의 사항
+    warnings: List[str]
+
+
+class ComprehensiveAnalysis(BaseModel):
+    """종합 분석 결과"""
+    user_id: str
+    analysis_period: str  # 예: "최근 30일"
+    pattern: WorkoutPatternAnalysis
+    insights: WorkoutInsight

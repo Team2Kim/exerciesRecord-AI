@@ -18,12 +18,14 @@ from models.database import get_db, create_tables, SessionLocal
 from models.schemas import (
     Exercise, ExerciseCreate, UserGoal, UserGoalCreate,
     RecommendationRequest, RecommendationResponse,
-    UserFeedbackCreate, UserFeedback, HealthStatus
+    UserFeedbackCreate, UserFeedback, HealthStatus,
+    ComprehensiveAnalysis, WorkoutPatternAnalysis, WorkoutInsight
 )
 from services.recommendation import ExerciseRecommendationService
 from services.database_service import DatabaseService
 from services.external_api import external_api
 from services.external_recommendation import external_recommendation_service
+from services.workout_analysis import WorkoutAnalysisService
 
 
 # FastAPI 앱 초기화
@@ -654,6 +656,92 @@ async def reset_database():
         return {"message": "데이터베이스가 초기화되었습니다"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"초기화 중 오류: {str(e)}")
+
+
+# ==================== 운동 일지 분석 API ====================
+
+@app.get("/api/analysis/workout-pattern/{user_id}", response_model=WorkoutPatternAnalysis)
+async def analyze_workout_pattern(
+    user_id: str,
+    days: int = Query(default=30, ge=1, le=365, description="분석 기간 (일)"),
+    db: Session = Depends(get_db)
+):
+    """
+    특정 사용자의 운동 패턴을 분석합니다.
+    
+    - **user_id**: 사용자 ID
+    - **days**: 분석 기간 (기본: 30일)
+    
+    Returns:
+    - 운동 빈도, 신체 부위별 분포, 주로 한 운동, 강도 분포 등
+    """
+    try:
+        analysis_service = WorkoutAnalysisService(db)
+        pattern = analysis_service.analyze_workout_pattern(user_id, days)
+        return pattern
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"운동 패턴 분석 중 오류 발생: {str(e)}"
+        )
+
+
+@app.get("/api/analysis/insights/{user_id}", response_model=WorkoutInsight)
+async def get_workout_insights(
+    user_id: str,
+    days: int = Query(default=30, ge=1, le=365, description="분석 기간 (일)"),
+    db: Session = Depends(get_db)
+):
+    """
+    사용자의 운동 데이터를 기반으로 맞춤형 인사이트를 제공합니다.
+    
+    - **user_id**: 사용자 ID
+    - **days**: 분석 기간 (기본: 30일)
+    
+    Returns:
+    - 과사용 부위 (휴식 필요)
+    - 부족한 부위 (보충 필요)
+    - 균형 점수
+    - 맞춤 추천 및 주의사항
+    """
+    try:
+        analysis_service = WorkoutAnalysisService(db)
+        insights = analysis_service.generate_insights(user_id, days)
+        return insights
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"인사이트 생성 중 오류 발생: {str(e)}"
+        )
+
+
+@app.get("/api/analysis/comprehensive/{user_id}", response_model=ComprehensiveAnalysis)
+async def get_comprehensive_analysis(
+    user_id: str,
+    days: int = Query(default=30, ge=1, le=365, description="분석 기간 (일)"),
+    db: Session = Depends(get_db)
+):
+    """
+    사용자의 종합 운동 분석 결과를 반환합니다.
+    
+    - **user_id**: 사용자 ID
+    - **days**: 분석 기간 (기본: 30일)
+    
+    Returns:
+    - 운동 패턴 분석 + 맞춤 인사이트 통합
+    - 어떤 운동을 주로 하는지
+    - 어떤 근육이 주로 사용되는지
+    - 어떤 부위에 휴식/보충이 필요한지
+    """
+    try:
+        analysis_service = WorkoutAnalysisService(db)
+        comprehensive = analysis_service.get_comprehensive_analysis(user_id, days)
+        return comprehensive
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"종합 분석 중 오류 발생: {str(e)}"
+        )
 
 
 # ==================== 서버 실행 ====================

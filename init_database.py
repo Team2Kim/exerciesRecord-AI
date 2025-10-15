@@ -7,7 +7,9 @@ import json
 import os
 from sqlalchemy.orm import Session
 from models.database import engine, SessionLocal, create_tables
-from models.database import Exercise, UserGoal, WorkoutPlan, WorkoutSession, WorkoutExercise, UserFeedback
+from models.database import Exercise, UserGoal, WorkoutPlan, WorkoutSession, WorkoutExercise, UserFeedback, DailyLog, LogExercise
+from datetime import datetime, timedelta
+import random
 
 
 def load_sample_exercises():
@@ -166,6 +168,111 @@ def insert_sample_feedback(db: Session):
         print(f"❌ 피드백 삽입 중 오류 발생: {e}")
 
 
+def insert_sample_daily_logs(db: Session):
+    """샘플 운동 일지 데이터 삽입"""
+    
+    # 기존 일지 데이터 확인
+    existing_count = db.query(DailyLog).count()
+    if existing_count > 0:
+        print(f"⚠️ 이미 {existing_count}개의 일지가 존재합니다. 삽입을 건너뜁니다.")
+        return
+    
+    # 운동 데이터 조회
+    exercises = db.query(Exercise).all()
+    if not exercises:
+        print("❌ 운동 데이터가 없어 일지를 생성할 수 없습니다.")
+        return
+    
+    # 신체 부위별 운동 분류
+    exercises_by_part = {}
+    for ex in exercises:
+        if ex.body_part not in exercises_by_part:
+            exercises_by_part[ex.body_part] = []
+        exercises_by_part[ex.body_part].append(ex)
+    
+    # 최근 30일 간의 샘플 일지 생성 (주 3-4회)
+    user_id = "demo_user"
+    today = datetime.now().date()
+    
+    # 30일간 주 3-4회 운동 (랜덤하게 운동한 날 선택)
+    workout_days = []
+    for week in range(5):  # 5주
+        week_start = today - timedelta(days=7 * week)
+        # 각 주에 3-4일 랜덤 선택
+        days_this_week = random.randint(3, 4)
+        for _ in range(days_this_week):
+            day_offset = random.randint(0, 6)
+            workout_day = week_start - timedelta(days=day_offset)
+            if workout_day not in workout_days and workout_day <= today:
+                workout_days.append(workout_day)
+    
+    workout_days.sort()
+    
+    # 운동 패턴 정의 (가슴에 편중되도록)
+    body_part_weights = {
+        "가슴": 0.35,    # 35% - 과사용
+        "등": 0.08,      # 8% - 부족
+        "하체": 0.25,    # 25%
+        "어깨": 0.15,    # 15%
+        "팔": 0.12,      # 12%
+        "코어": 0.05     # 5% - 부족
+    }
+    
+    daily_logs = []
+    
+    for day in workout_days:
+        # 일지 생성
+        log = DailyLog(
+            user_id=user_id,
+            date=day.strftime("%Y-%m-%d"),
+            memo=random.choice([
+                "오늘은 컨디션이 좋았다!",
+                "힘들었지만 완료",
+                "근육통이 있지만 운동 완료",
+                "좋은 운동이었다",
+                None
+            ])
+        )
+        db.add(log)
+        db.flush()  # ID 생성
+        
+        # 이 날 할 운동 3-5개 선택 (신체 부위 가중치에 따라)
+        num_exercises = random.randint(3, 5)
+        
+        for _ in range(num_exercises):
+            # 가중치에 따라 신체 부위 선택
+            body_part = random.choices(
+                list(body_part_weights.keys()),
+                weights=list(body_part_weights.values())
+            )[0]
+            
+            # 해당 부위의 운동 중 랜덤 선택
+            if body_part in exercises_by_part and exercises_by_part[body_part]:
+                exercise = random.choice(exercises_by_part[body_part])
+                
+                # 운동 기록 생성
+                log_exercise = LogExercise(
+                    daily_log_id=log.id,
+                    exercise_id=exercise.id,
+                    intensity=random.choices(
+                        ["상", "중", "하"],
+                        weights=[0.3, 0.5, 0.2]  # 중강도가 가장 많음
+                    )[0],
+                    exercise_time=random.randint(15, 45)  # 15-45분
+                )
+                db.add(log_exercise)
+        
+        daily_logs.append(log)
+    
+    try:
+        db.commit()
+        print(f"✅ {len(daily_logs)}개의 샘플 일지를 성공적으로 삽입했습니다.")
+        print(f"   (최근 30일간 운동 기록)")
+    except Exception as e:
+        db.rollback()
+        print(f"❌ 일지 삽입 중 오류 발생: {e}")
+
+
 def verify_database(db: Session):
     """데이터베이스 내용 확인"""
     print("\n📊 데이터베이스 현황:")
@@ -177,6 +284,8 @@ def verify_database(db: Session):
     session_count = db.query(WorkoutSession).count()
     workout_exercise_count = db.query(WorkoutExercise).count()
     feedback_count = db.query(UserFeedback).count()
+    daily_log_count = db.query(DailyLog).count()
+    log_exercise_count = db.query(LogExercise).count()
     
     print(f"운동 데이터: {exercise_count}개")
     print(f"사용자 목표: {goal_count}개")
@@ -184,6 +293,8 @@ def verify_database(db: Session):
     print(f"운동 세션: {session_count}개")
     print(f"계획별 운동: {workout_exercise_count}개")
     print(f"사용자 피드백: {feedback_count}개")
+    print(f"운동 일지: {daily_log_count}개")
+    print(f"일지 운동 기록: {log_exercise_count}개")
     
     # 운동 부위별 통계
     print(f"\n🏋️ 운동 부위별 통계:")
@@ -230,8 +341,12 @@ def main():
         print("\n4️⃣ 샘플 피드백 삽입...")
         insert_sample_feedback(db)
         
-        # 6. 데이터베이스 확인
-        print("\n5️⃣ 데이터베이스 확인...")
+        # 6. 샘플 운동 일지 삽입
+        print("\n5️⃣ 샘플 운동 일지 삽입...")
+        insert_sample_daily_logs(db)
+        
+        # 7. 데이터베이스 확인
+        print("\n6️⃣ 데이터베이스 확인...")
         verify_database(db)
         
         db.close()
