@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ExRecAI - 운동 추천 AI 시스템</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- 네비게이션 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top">
+        <div class="container">
+            <a class="navbar-brand" href="#home">
+                <i class="fas fa-dumbbell"></i> ExRecAI
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#home">홈</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#recommend">운동 추천</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#exercises">운동 DB</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#videos">운동 영상</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#stats">통계</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/docs" target="_blank">API 문서</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 메인 컨테이너 -->
+    <main class="pt-5">
+        <!-- 홈 섹션 -->
+        <section id="home" class="hero-section">
+            <div class="container">
+                <div class="row align-items-center min-vh-100">
+                    <div class="col-lg-6">
+                        <h1 class="display-4 fw-bold text-primary mb-4">
+                            <i class="fas fa-robot"></i> ExRecAI
+                        </h1>
+                        <h2 class="h3 text-muted mb-4">AI 기반 개인 맞춤 운동 추천 시스템</h2>
+                        <p class="lead mb-5">
+                            당신의 목표, 경험 수준, 가능한 시간을 바탕으로 
+                            최적화된 운동 계획을 AI가 추천해드립니다.
+                        </p>
+                        <div class="d-flex gap-3 flex-wrap">
+                            <button class="btn btn-primary btn-lg" onclick="scrollToSection('recommend')">
+                                <i class="fas fa-play"></i> 지금 시작하기
+                            </button>
+                            <button class="btn btn-outline-primary btn-lg" onclick="scrollToSection('exercises')">
+                                <i class="fas fa-database"></i> 운동 둘러보기
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="feature-cards">
+                            <div class="card mb-3">
+                                <div class="card-body">
+                                    <h5 class="card-title">
+                                        <i class="fas fa-target text-success"></i> 목표 기반 추천
+                                    </h5>
+                                    <p class="card-text">근육 증가, 다이어트, 체력 향상 등 개인 목표에 맞는 운동 추천</p>
+                                </div>
+                            </div>
+                            <div class="card mb-3">
+                                <div class="card-body">
+                                    <h5 class="card-title">
+                                        <i class="fas fa-calendar-alt text-info"></i> 분할 방식 지원
+                                    </h5>
+                                    <p class="card-text">2분할, 3분할, 전신 운동 등 다양한 루틴 방식 지원</p>
+                                </div>
+                            </div>
+                            <div class="card">
+                                <div class="card-body">
+                                    <h5 class="card-title">
+                                        <i class="fas fa-chart-line text-warning"></i> 실시간 분석
+                                    </h5>
+                                    <p class="card-text">운동 기록과 피드백을 통한 지속적인 개선</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 운동 추천 섹션 -->
+        <section id="recommend" class="py-5 bg-light">
+            <div class="container">
+                <div class="row">
+                    <div class="col-12 text-center mb-5">
+                        <h2 class="display-5 fw-bold text-primary">
+                            <i class="fas fa-magic"></i> AI 운동 추천
+                        </h2>
+                        <p class="lead text-muted">몇 가지 정보만 입력하면 맞춤형 운동 계획을 생성해드립니다</p>
+                    </div>
+                </div>
+
+                <div class="row justify-content-center">
+                    <div class="col-lg-8">
+                        <div class="card shadow">
+                            <div class="card-body p-4">
+                                <form id="recommendForm">
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="userId" class="form-label">사용자 ID</label>
+                                            <input type="text" class="form-control" id="userId" value="demo_user" required>
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label for="weeklyFrequency" class="form-label">주간 운동 빈도</label>
+                                            <select class="form-select" id="weeklyFrequency" required>
+                                                <option value="3">주 3회</option>
+                                                <option value="4" selected>주 4회</option>
+                                                <option value="5">주 5회</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="splitType" class="form-label">분할 방식</label>
+                                            <select class="form-select" id="splitType" required>
+                                                <option value="전신">전신 운동</option>
+                                                <option value="2분할">2분할</option>
+                                                <option value="3분할" selected>3분할</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label for="primaryGoal" class="form-label">주 목표</label>
+                                            <select class="form-select" id="primaryGoal" required>
+                                                <option value="근육 증가" selected>근육 증가</option>
+                                                <option value="다이어트">다이어트</option>
+                                                <option value="체력 향상">체력 향상</option>
+                                                <option value="재활">재활</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="experienceLevel" class="form-label">경험 수준</label>
+                                            <select class="form-select" id="experienceLevel" required>
+                                                <option value="초급">초급</option>
+                                                <option value="중급" selected>중급</option>
+                                                <option value="고급">고급</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label for="availableTime" class="form-label">1회 운동 시간 (분)</label>
+                                            <input type="number" class="form-control" id="availableTime" min="15" max="180" value="60" required>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="preferredEquipment" class="form-label">선호 장비 (선택사항)</label>
+                                        <input type="text" class="form-control" id="preferredEquipment" placeholder="예: 바벨, 덤벨, 체중운동">
+                                    </div>
+                                    
+                                    <div class="text-center">
+                                        <button type="submit" class="btn btn-primary btn-lg me-2">
+                                            <i class="fas fa-brain"></i> 기본 AI 추천
+                                        </button>
+                                        <button type="button" class="btn btn-success btn-lg me-2" onclick="handleExternalAPIRecommend(event)">
+                                            <i class="fas fa-video"></i> 영상 기반 추천
+                                        </button>
+                                        <button type="button" class="btn btn-info btn-lg" onclick="handleEnhancedRecommendSubmit(event, true)">
+                                            <i class="fas fa-magic"></i> 통합 추천
+                                        </button>
+                                    </div>
+                                    <div class="text-center mt-2">
+                                        <small class="text-muted">
+                                            • 기본: 내장 운동 DB 활용 | • 영상 기반: 외부 API 운동 영상 활용 | • 통합: 기본 + 영상 정보
+                                        </small>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 추천 결과 -->
+                <div id="recommendationResult" class="row mt-5" style="display: none;">
+                    <div class="col-12">
+                        <div class="card shadow">
+                            <div class="card-header bg-success text-white">
+                                <h4 class="mb-0">
+                                    <i class="fas fa-check-circle"></i> 추천 결과
+                                </h4>
+                            </div>
+                            <div class="card-body">
+                                <div id="recommendationContent"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 운동 데이터베이스 섹션 -->
+        <section id="exercises" class="py-5">
+            <div class="container">
+                <div class="row">
+                    <div class="col-12 text-center mb-5">
+                        <h2 class="display-5 fw-bold text-primary">
+                            <i class="fas fa-database"></i> 운동 데이터베이스
+                        </h2>
+                        <p class="lead text-muted">다양한 운동 정보를 검색하고 살펴보세요</p>
+                    </div>
+                </div>
+
+                <!-- 검색 및 필터 -->
+                <div class="row mb-4">
+                    <div class="col-lg-6 mb-3">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="exerciseSearch" placeholder="운동 이름으로 검색...">
+                            <button class="btn btn-outline-primary" type="button" onclick="searchExercises()">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="row">
+                            <div class="col-md-4 mb-2">
+                                <select class="form-select form-select-sm" id="bodyPartFilter" onchange="filterExercises()">
+                                    <option value="">모든 부위</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-2">
+                                <select class="form-select form-select-sm" id="categoryFilter" onchange="filterExercises()">
+                                    <option value="">모든 카테고리</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-2">
+                                <select class="form-select form-select-sm" id="difficultyFilter" onchange="filterExercises()">
+                                    <option value="">모든 난이도</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 운동 목록 -->
+                <div id="exerciseList" class="row">
+                    <!-- 동적으로 생성될 운동 카드들 -->
+                </div>
+
+                <!-- 로딩 인디케이터 -->
+                <div id="exerciseLoading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted">운동 데이터를 불러오는 중...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 운동 영상 섹션 -->
+        <section id="videos" class="py-5">
+            <div class="container">
+                <div class="row">
+                    <div class="col-12 text-center mb-5">
+                        <h2 class="display-5 fw-bold text-primary">
+                            <i class="fas fa-video"></i> 운동 영상
+                        </h2>
+                        <p class="lead text-muted">실제 운동 영상으로 정확한 자세를 배워보세요</p>
+                    </div>
+                </div>
+
+                <!-- 영상 검색 탭 -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <ul class="nav nav-tabs" id="videoTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="search-tab" data-bs-toggle="tab" data-bs-target="#search-pane" type="button" role="tab">
+                                    <i class="fas fa-search"></i> 영상 검색
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="popular-tab" data-bs-toggle="tab" data-bs-target="#popular-pane" type="button" role="tab">
+                                    <i class="fas fa-fire"></i> 인기 영상
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="muscle-tab" data-bs-toggle="tab" data-bs-target="#muscle-pane" type="button" role="tab">
+                                    <i class="fas fa-dumbbell"></i> 근육별 검색
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="videoTabContent">
+                    <!-- 영상 검색 탭 -->
+                    <div class="tab-pane fade show active" id="search-pane" role="tabpanel">
+                        <div class="row mb-4">
+                            <div class="col-lg-8 mx-auto">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <form id="videoSearchForm" onsubmit="handleVideoSearch(event)">
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="videoKeyword" class="form-label">운동 이름</label>
+                                                    <input type="text" class="form-control" id="videoKeyword" placeholder="예: 벤치프레스, 스쿼트">
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="videoTargetGroup" class="form-label">대상 그룹</label>
+                                                    <select class="form-select" id="videoTargetGroup">
+                                                        <option value="">전체</option>
+                                                        <option value="유소년">유소년</option>
+                                                        <option value="청소년">청소년</option>
+                                                        <option value="성인">성인</option>
+                                                        <option value="고령자">고령자</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="videoFitnessFactor" class="form-label">체력 요인</label>
+                                                    <select class="form-select" id="videoFitnessFactor">
+                                                        <option value="">전체</option>
+                                                        <option value="근력">근력</option>
+                                                        <option value="지구력">지구력</option>
+                                                        <option value="유연성">유연성</option>
+                                                        <option value="순발력">순발력</option>
+                                                        <option value="균형">균형</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-6 mb-3">
+                                                    <label for="videoExerciseTool" class="form-label">운동 도구</label>
+                                                    <select class="form-select" id="videoExerciseTool">
+                                                        <option value="">전체</option>
+                                                        <option value="맨몸">맨몸</option>
+                                                        <option value="바벨">바벨</option>
+                                                        <option value="덤벨">덤벨</option>
+                                                        <option value="밴드">밴드</option>
+                                                        <option value="머신">머신</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="text-center">
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="fas fa-search"></i> 영상 검색
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="videoSearchResults" class="row">
+                            <!-- 검색 결과가 여기에 표시됩니다 -->
+                        </div>
+                    </div>
+
+                    <!-- 인기 영상 탭 -->
+                    <div class="tab-pane fade" id="popular-pane" role="tabpanel">
+                        <div class="row mb-3">
+                            <div class="col-md-4 mx-auto">
+                                <select class="form-select" id="popularTargetGroup" onchange="loadPopularVideos()">
+                                    <option value="성인">성인</option>
+                                    <option value="청소년">청소년</option>
+                                    <option value="유소년">유소년</option>
+                                    <option value="고령자">고령자</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="popularVideos" class="row">
+                            <!-- 인기 영상이 여기에 표시됩니다 -->
+                        </div>
+                    </div>
+
+                    <!-- 근육별 검색 탭 -->
+                    <div class="tab-pane fade" id="muscle-pane" role="tabpanel">
+                        <div class="row mb-4">
+                            <div class="col-lg-6 mx-auto">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <form id="muscleSearchForm" onsubmit="handleMuscleSearch(event)">
+                                            <div class="mb-3">
+                                                <label for="muscleNames" class="form-label">근육 이름 (쉼표로 구분)</label>
+                                                <input type="text" class="form-control" id="muscleNames" 
+                                                       placeholder="예: 큰가슴근, 어깨삼각근" required>
+                                                <div class="form-text">여러 근육을 검색하려면 쉼표(,)로 구분하세요.</div>
+                                            </div>
+                                            <div class="text-center">
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="fas fa-dumbbell"></i> 근육별 검색
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="muscleSearchResults" class="row">
+                            <!-- 근육별 검색 결과가 여기에 표시됩니다 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 통계 섹션 -->
+        <section id="stats" class="py-5 bg-light">
+            <div class="container">
+                <div class="row">
+                    <div class="col-12 text-center mb-5">
+                        <h2 class="display-5 fw-bold text-primary">
+                            <i class="fas fa-chart-bar"></i> 시스템 통계
+                        </h2>
+                        <p class="lead text-muted">ExRecAI의 현재 상태와 통계 정보</p>
+                    </div>
+                </div>
+
+                <div id="statisticsContent" class="row">
+                    <!-- 동적으로 생성될 통계 카드들 -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 푸터 -->
+    <footer class="bg-dark text-white py-4">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5>ExRecAI</h5>
+                    <p class="mb-0">AI 기반 개인 맞춤 운동 추천 시스템</p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <p class="mb-0">
+                        <a href="/docs" class="text-white me-3">API 문서</a>
+                        <a href="/health" class="text-white">서버 상태</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- 토스트 알림 -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="alertToast" class="toast" role="alert">
+            <div class="toast-header">
+                <strong class="me-auto">ExRecAI</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body" id="toastMessage">
+                <!-- 토스트 메시지 내용 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Custom JS -->
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/video-handlers.js"></script>
+</body>
+</html>
