@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, Depends, Query, status
+from fastapi import FastAPI, HTTPException, Depends, Query, Header, status
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -660,6 +660,55 @@ async def reset_database():
 
 # ==================== 운동 일지 분석 API ====================
 
+@app.get("/api/journals/by-date")
+async def get_daily_log_by_date(
+    date: str = Query(..., description="조회할 날짜 (형식: yyyy-MM-dd)"),
+    authorization: str = Header(..., description="Bearer 토큰")
+):
+    """
+    외부 API를 통해 특정 날짜의 운동 일지를 조회합니다.
+    
+    - **date**: 조회할 날짜 (yyyy-MM-dd 형식, 예: 2025-10-08)
+    - **Authorization**: HTTP Header로 Bearer 토큰 전달 (예: Bearer eyJhbGc...)
+    
+    Returns:
+    - 운동 일지 데이터 (로그 ID, 날짜, 메모, 운동 기록 리스트)
+    
+    Example:
+        GET /api/journals/by-date?date=2025-10-08
+        Headers: Authorization: Bearer YOUR_ACCESS_TOKEN
+    """
+    try:
+        # Bearer 토큰에서 실제 토큰 값 추출
+        access_token = authorization
+        if authorization.startswith("Bearer "):
+            access_token = authorization[7:]  # "Bearer " 제거
+        
+        # 외부 API 호출
+        result = await external_api.get_daily_log_by_date(
+            date=date,
+            access_token=access_token
+        )
+        
+        if result.get("success"):
+            return result
+        else:
+            # 실패 시 적절한 HTTP 상태 코드 반환
+            status_code = result.get("status_code", 500)
+            raise HTTPException(
+                status_code=status_code,
+                detail=result.get("error", "운동 일지 조회 실패")
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"운동 일지 조회 중 오류 발생: {str(e)}"
+        )
+
+
 @app.get("/api/analysis/workout-pattern/{user_id}", response_model=WorkoutPatternAnalysis)
 async def analyze_workout_pattern(
     user_id: str,
@@ -749,15 +798,23 @@ async def get_comprehensive_analysis(
 if __name__ == "__main__":
     import uvicorn
     
+    # 환경 변수에서 포트 설정 (CloudType 등 배포 환경 대응)
+    port = int(os.getenv("PORT", 3000))  # CloudType 기본 포트 3000
+    host = os.getenv("HOST", "0.0.0.0")
+    
     print("🚀 ExRecAI 서버를 시작합니다...")
-    print("📍 서버 주소: http://localhost:8000")
-    print("📚 API 문서: http://localhost:8000/docs")
+    print(f"📍 서버 주소: http://{host}:{port}")
+    print(f"📚 API 문서: http://{host}:{port}/docs")
     print("🔥 Ctrl+C로 서버를 중지할 수 있습니다.")
+    
+    # CloudType 배포 환경 감지
+    if os.getenv("CLOUDTYPE"):
+        print("☁️ CloudType 배포 환경에서 실행 중...")
     
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,  # 개발용: 코드 변경시 자동 재시작
+        host=host,
+        port=port,
+        reload=os.getenv("ENVIRONMENT") == "development",  # 개발 환경에서만 reload
         log_level="info"
     )

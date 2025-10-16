@@ -14,6 +14,7 @@ class ExternalExerciseAPI:
     
     def __init__(self):
         self.base_url = "http://52.54.123.236:8080/api/exercises"
+        self.journals_base_url = "http://52.54.123.236:8080/api/journals"
         self.timeout = 30.0
         
         # 캐시 관리
@@ -161,6 +162,76 @@ class ExternalExerciseAPI:
             return False
             
         return datetime.now() < self._cache_expiry[cache_key]
+
+
+    async def get_daily_log_by_date(
+        self,
+        date: str,
+        access_token: str
+    ) -> Dict[str, Any]:
+        """
+        특정 날짜의 운동 일지 조회 (외부 API)
+        
+        Args:
+            date: 조회할 날짜 (형식: yyyy-MM-dd)
+            access_token: 인증 토큰 (Bearer 토큰)
+            
+        Returns:
+            운동 일지 데이터 (DailyLogResponseDto)
+        """
+        
+        try:
+            # Authorization 헤더 구성
+            headers = {
+                "Authorization": f"Bearer {access_token}"
+            }
+            
+            # 쿼리 파라미터 구성
+            params = {
+                "date": date
+            }
+            
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                url = f"{self.journals_base_url}/by-date"
+                response = await client.get(url, params=params, headers=headers)
+                response.raise_for_status()
+                
+                data = response.json()
+                return {
+                    "success": True,
+                    "data": data,
+                    "date": date
+                }
+                
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return {
+                    "success": False,
+                    "error": "해당 날짜에 작성된 일지가 없습니다",
+                    "status_code": 404,
+                    "date": date
+                }
+            elif e.response.status_code == 401:
+                return {
+                    "success": False,
+                    "error": "인증이 필요합니다. 유효한 토큰을 제공해주세요",
+                    "status_code": 401,
+                    "date": date
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"API 호출 실패: {str(e)}",
+                    "status_code": e.response.status_code,
+                    "date": date
+                }
+        except httpx.HTTPError as e:
+            print(f"운동 일지 조회 API 호출 실패: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "date": date
+            }
 
 
     def clear_cache(self):
