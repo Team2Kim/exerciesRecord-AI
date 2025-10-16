@@ -660,19 +660,155 @@ async def reset_database():
 
 # ==================== 운동 일지 분석 API ====================
 
+async def analyze_daily_workout(workout_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    외부 API에서 받은 운동 일지 데이터를 분석합니다.
+    
+    Args:
+        workout_data: 외부 API에서 받은 운동 일지 데이터
+        
+    Returns:
+        분석 결과 (운동 패턴, 강도 분석, 추천사항 등)
+    """
+    try:
+        exercises = workout_data.get("exercises", [])
+        
+        if not exercises:
+            return {
+                "summary": "운동 기록이 없습니다.",
+                "total_exercises": 0,
+                "total_time": 0,
+                "recommendations": ["운동을 시작해보세요!"]
+            }
+        
+        # 기본 통계 계산
+        total_exercises = len(exercises)
+        total_time = sum(ex.get("exerciseTime", 0) for ex in exercises)
+        avg_time_per_exercise = total_time / total_exercises if total_exercises > 0 else 0
+        
+        # 강도 분석
+        intensity_dist = {"상": 0, "중": 0, "하": 0}
+        for ex in exercises:
+            intensity = ex.get("intensity", "중")
+            if intensity in intensity_dist:
+                intensity_dist[intensity] += 1
+        
+        # 운동 부위 분석 (bodyPart이 null인 경우 exerciseTool로 대체)
+        body_parts = {}
+        exercise_tools = {}
+        muscles = set()
+        
+        for ex in exercises:
+            exercise_info = ex.get("exercise", {})
+            
+            # 운동 부위 (bodyPart이 null이면 exerciseTool 사용)
+            body_part = exercise_info.get("bodyPart")
+            if not body_part:
+                body_part = exercise_info.get("exerciseTool", "기타")
+            body_parts[body_part] = body_parts.get(body_part, 0) + 1
+            
+            # 운동 도구
+            tool = exercise_info.get("exerciseTool", "기타")
+            exercise_tools[tool] = exercise_tools.get(tool, 0) + 1
+            
+            # 근육 부위
+            ex_muscles = exercise_info.get("muscles", [])
+            for muscle in ex_muscles:
+                muscles.add(muscle)
+        
+        # 가장 많이 한 운동
+        most_frequent_body_part = max(body_parts.items(), key=lambda x: x[1]) if body_parts else ("없음", 0)
+        most_used_tool = max(exercise_tools.items(), key=lambda x: x[1]) if exercise_tools else ("없음", 0)
+        
+        # 강도별 비율 계산
+        total_intensity = sum(intensity_dist.values())
+        intensity_percentage = {}
+        for intensity, count in intensity_dist.items():
+            intensity_percentage[intensity] = round((count / total_intensity * 100), 1) if total_intensity > 0 else 0
+        
+        # AI 분석 및 추천사항 생성
+        recommendations = []
+        warnings = []
+        insights = []
+        
+        # 강도 분석
+        if intensity_percentage.get("상", 0) > 60:
+            warnings.append("고강도 운동 비율이 높습니다. 충분한 휴식을 취하세요.")
+        elif intensity_percentage.get("하", 0) > 60:
+            recommendations.append("운동 강도를 점진적으로 높여보세요.")
+        
+        # 운동 시간 분석
+        if avg_time_per_exercise > 30:
+            insights.append(f"운동당 평균 {avg_time_per_exercise:.1f}분으로 충분한 시간을 투자하고 있습니다.")
+        elif avg_time_per_exercise < 10:
+            recommendations.append("운동 시간을 조금 더 늘려보세요.")
+        
+        # 운동 다양성 분석
+        if len(body_parts) == 1:
+            recommendations.append("다양한 신체 부위를 운동해보세요.")
+        else:
+            insights.append(f"{len(body_parts)}개 부위를 골고루 운동했습니다.")
+        
+        # 특정 운동에 대한 분석
+        for ex in exercises:
+            exercise_info = ex.get("exercise", {})
+            exercise_name = exercise_info.get("title", "")
+            exercise_time = ex.get("exerciseTime", 0)
+            intensity = ex.get("intensity", "")
+            
+            if "하체" in exercise_name or "다리" in exercise_name or "스쿼트" in exercise_name:
+                insights.append(f"하체 운동 '{exercise_name}'을 {exercise_time}분간 {intensity}강도로 수행했습니다.")
+        
+        # 메모 분석
+        memo = workout_data.get("memo", "")
+        if memo:
+            insights.append(f"메모: {memo}")
+        
+        # 결과 구성
+        workout_date = workout_data.get("date", "해당 날짜")
+        analysis_result = {
+            "summary": f"{workout_date}에 {total_exercises}개 운동을 총 {total_time}분간 수행했습니다.",
+            "statistics": {
+                "total_exercises": total_exercises,
+                "total_time": total_time,
+                "avg_time_per_exercise": round(avg_time_per_exercise, 1),
+                "intensity_distribution": intensity_dist,
+                "intensity_percentage": intensity_percentage,
+                "body_parts_trained": body_parts,
+                "exercise_tools_used": exercise_tools,
+                "muscles_targeted": list(muscles)
+            },
+            "insights": insights,
+            "recommendations": recommendations,
+            "warnings": warnings,
+            "highlights": {
+                "most_frequent_body_part": most_frequent_body_part,
+                "most_used_tool": most_used_tool,
+                "dominant_intensity": max(intensity_dist.items(), key=lambda x: x[1]) if total_intensity > 0 else ("없음", 0)
+            }
+        }
+        
+        return analysis_result
+        
+    except Exception as e:
+        return {
+            "error": f"분석 중 오류 발생: {str(e)}",
+            "summary": "운동 데이터 분석에 실패했습니다."
+        }
+
 @app.get("/api/journals/by-date")
 async def get_daily_log_by_date(
     date: str = Query(..., description="조회할 날짜 (형식: yyyy-MM-dd)"),
     authorization: str = Header(..., description="Bearer 토큰")
 ):
     """
-    외부 API를 통해 특정 날짜의 운동 일지를 조회합니다.
+    외부 API를 통해 특정 날짜의 운동 일지를 조회하고 분석합니다.
     
     - **date**: 조회할 날짜 (yyyy-MM-dd 형식, 예: 2025-10-08)
     - **Authorization**: HTTP Header로 Bearer 토큰 전달 (예: Bearer eyJhbGc...)
     
     Returns:
-    - 운동 일지 데이터 (로그 ID, 날짜, 메모, 운동 기록 리스트)
+    - 운동 일지 데이터 + AI 분석 결과 (운동 패턴, 강도 분석, 추천사항 등)
     
     Example:
         GET /api/journals/by-date?date=2025-10-08
@@ -691,7 +827,16 @@ async def get_daily_log_by_date(
         )
         
         if result.get("success"):
-            return result
+            # 운동 일지 데이터 분석
+            analysis_result = await analyze_daily_workout(result["data"])
+            
+            # 원본 데이터와 분석 결과를 함께 반환
+            return {
+                "success": True,
+                "date": date,
+                "original_data": result["data"],
+                "analysis": analysis_result
+            }
         else:
             # 실패 시 적절한 HTTP 상태 코드 반환
             status_code = result.get("status_code", 500)
@@ -705,7 +850,7 @@ async def get_daily_log_by_date(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"운동 일지 조회 중 오류 발생: {str(e)}"
+            detail=f"운동 일지 조회 및 분석 중 오류 발생: {str(e)}"
         )
 
 

@@ -59,25 +59,71 @@ async def test_get_daily_log():
                 print("-" * 60)
                 
                 if data.get("success"):
-                    log_data = data.get("data", {})
+                    original_data = data.get("original_data", {})
+                    analysis = data.get("analysis", {})
+                    
                     print(f"✅ 성공!")
-                    print(f"   로그 ID: {log_data.get('logId')}")
-                    print(f"   날짜: {log_data.get('date')}")
-                    print(f"   메모: {log_data.get('memo')}")
-                    print(f"   운동 개수: {len(log_data.get('exercises', []))}")
+                    print(f"   로그 ID: {original_data.get('logId')}")
+                    print(f"   날짜: {original_data.get('date')}")
+                    print(f"   메모: {original_data.get('memo')}")
+                    print(f"   운동 개수: {len(original_data.get('exercises', []))}")
                     print()
                     
-                    # 운동 기록 출력
-                    exercises = log_data.get("exercises", [])
+                    # AI 분석 결과 출력
+                    if analysis:
+                        print("🤖 AI 분석 결과:")
+                        print(f"   📋 요약: {analysis.get('summary', 'N/A')}")
+                        print()
+                        
+                        # 통계 정보
+                        stats = analysis.get('statistics', {})
+                        if stats:
+                            print("   📊 통계:")
+                            print(f"      - 총 운동 시간: {stats.get('total_time', 0)}분")
+                            print(f"      - 운동당 평균 시간: {stats.get('avg_time_per_exercise', 0)}분")
+                            
+                            # 강도 분포
+                            intensity_dist = stats.get('intensity_distribution', {})
+                            if intensity_dist:
+                                print(f"      - 강도 분포: 상({intensity_dist.get('상', 0)}) 중({intensity_dist.get('중', 0)}) 하({intensity_dist.get('하', 0)})")
+                            
+                            # 운동 부위
+                            body_parts = stats.get('body_parts_trained', {})
+                            if body_parts:
+                                print(f"      - 운동 부위: {', '.join([f'{part}({count})' for part, count in body_parts.items()])}")
+                        print()
+                        
+                        # 인사이트
+                        insights = analysis.get('insights', [])
+                        if insights:
+                            print("   💡 인사이트:")
+                            for insight in insights:
+                                print(f"      - {insight}")
+                            print()
+                        
+                        # 추천사항
+                        recommendations = analysis.get('recommendations', [])
+                        if recommendations:
+                            print("   💪 추천사항:")
+                            for rec in recommendations:
+                                print(f"      - {rec}")
+                            print()
+                        
+                        # 주의사항
+                        warnings = analysis.get('warnings', [])
+                        if warnings:
+                            print("   ⚠️ 주의사항:")
+                            for warning in warnings:
+                                print(f"      - {warning}")
+                            print()
+                    
+                    # 원본 운동 기록 출력 (간단히)
+                    exercises = original_data.get("exercises", [])
                     if exercises:
-                        print("💪 운동 기록:")
+                        print("💪 운동 기록 (요약):")
                         for idx, exercise in enumerate(exercises, 1):
                             ex_info = exercise.get("exercise", {})
-                            print(f"   {idx}. {ex_info.get('title', 'N/A')}")
-                            print(f"      - 강도: {exercise.get('intensity')}")
-                            print(f"      - 시간: {exercise.get('exerciseTime')}분")
-                            print(f"      - 부위: {ex_info.get('bodyPart')}")
-                            print(f"      - 도구: {ex_info.get('exerciseTool')}")
+                            print(f"   {idx}. {ex_info.get('title', 'N/A')} ({exercise.get('intensity')}강도, {exercise.get('exerciseTime')}분)")
                     else:
                         print("   운동 기록이 없습니다.")
                 else:
