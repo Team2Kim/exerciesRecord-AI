@@ -30,11 +30,13 @@ Frontend (Web UI) ──→ FastAPI Backend ──→ SQLite Database
 - **SQLite**: 경량 데이터베이스 (개발용)
 - **Pydantic**: 데이터 검증 및 모델링
 - **httpx**: 비동기 HTTP 클라이언트 (외부 API 통신)
+- **OpenAI**: GPT-4 기반 AI 운동 분석 및 추천
 
 ### AI/ML
 - **scikit-learn**: 머신러닝 알고리즘 (추후 확장)
 - **pandas**: 데이터 처리
 - **numpy**: 수치 계산
+- **OpenAI GPT-4**: 자연어 기반 운동 분석 및 추천
 
 ### Frontend
 - **HTML/CSS/JavaScript**: 기본 웹 인터페이스
@@ -77,6 +79,105 @@ Frontend (Web UI) ──→ FastAPI Backend ──→ SQLite Database
 - 사용자 피드백 학습
 - 협업 필터링
 - 성과 기반 조정
+
+## 🤖 OpenAI 기반 AI 운동 코치 기능
+
+### 🎯 새로운 기능
+
+**OpenAI GPT 모델을 활용한 지능형 운동 분석 및 루틴 추천:**
+
+1. **운동 일지 AI 분석** (`POST /api/workout-log/analyze`)
+   - 운동 강도, 시간, 다양성 평가
+   - 타겟 근육 분석 및 효과 평가
+   - 다음 운동을 위한 구체적인 추천
+   - 부상 예방을 위한 주의사항
+
+2. **AI 운동 루틴 추천** (`POST /api/workout-log/recommend`)
+   - 사용자 운동 기록 기반 맞춤 루틴
+   - 주간 운동 계획 자동 생성
+   - 운동명, 세트, 횟수, 휴식시간 포함
+   - 실천 가능한 구체적인 가이드
+
+### 📝 사용 예시
+
+#### 1️⃣ 운동 일지 분석
+```json
+POST /api/workout-log/analyze
+{
+  "logId": 3,
+  "date": "2025-10-08",
+  "memo": "근육을 추가한 후",
+  "exercises": [
+    {
+      "exercise": {
+        "title": "팔굽혀펴기",
+        "muscles": ["어깨세모근", "큰가슴근", "위팔세갈래근"]
+      },
+      "intensity": "상",
+      "exerciseTime": 20
+    }
+  ]
+}
+```
+
+**응답:**
+```json
+{
+  "success": true,
+  "ai_analysis": "당신의 운동을 분석한 결과...",
+  "basic_analysis": {
+    "summary": "2개 운동을 수행했습니다.",
+    "recommendations": [...]
+  },
+  "model": "gpt-4o-mini"
+}
+```
+
+#### 2️⃣ 운동 루틴 추천
+```json
+POST /api/workout-log/recommend?days=7&frequency=4
+{
+  "date": "2025-10-08",
+  "exercises": [...]
+}
+```
+
+**응답:**
+```json
+{
+  "success": true,
+  "ai_routine": "다음 7일간의 운동 루틴:\n\nDay 1 (가슴/삼두)...",
+  "routine_period": {
+    "days": 7,
+    "frequency": 4
+  },
+  "model": "gpt-4o-mini"
+}
+```
+
+### ⚙️ OpenAI API 설정
+
+`.env` 파일 생성:
+```bash
+OPENAI_API_KEY=sk-your-api-key-here
+```
+
+또는 환경변수로 설정:
+```bash
+export OPENAI_API_KEY="sk-your-api-key-here"
+```
+
+### 🧪 테스트 방법
+
+```bash
+# 테스트 스크립트 실행
+python test_openai_analysis.py
+```
+
+이 스크립트는 다음을 테스트합니다:
+- 운동 일지 AI 분석
+- 운동 루틴 추천
+- OpenAI API 연동 확인
 
 ## 🚀 시작하기
 
@@ -131,6 +232,7 @@ ExRecAI/
 ├── init_database.py           # 데이터베이스 초기화
 ├── test_api.py                # API 테스트 스크립트
 ├── test_external_api.py       # 외부 API 테스트
+├── test_openai_analysis.py    # OpenAI API 테스트
 ├── models/
 │   ├── __init__.py
 │   ├── database.py            # 데이터베이스 모델
@@ -139,7 +241,9 @@ ExRecAI/
 │   ├── __init__.py
 │   ├── recommendation.py      # AI 추천 로직
 │   ├── database_service.py    # DB 서비스
-│   └── external_api.py        # 외부 API 연동 서비스
+│   ├── external_api.py        # 외부 API 연동 서비스
+│   ├── openai_service.py      # OpenAI AI 서비스
+│   └── workout_analysis.py    # 운동 분석 서비스
 ├── static/
 │   ├── css/
 │   │   └── style.css          # 커스텀 스타일
@@ -282,6 +386,30 @@ GET /api/analysis/comprehensive/{user_id}?days=30
 http://localhost:8000/api/analysis/comprehensive/demo_user?days=30
 ```
 
+#### 4. AI 기반 맞춤 추천 (OpenAI 연동)
+```http
+GET /api/analysis/ai-recommendation/{user_id}?days=30
+```
+
+**응답 내용:**
+- 기본 분석 결과
+- AI가 생성한 맞춤형 운동 조언
+- 구체적인 추천 운동 루틴
+
+**테스트:**
+```
+http://localhost:8000/api/analysis/ai-recommendation/demo_user?days=30
+```
+
+**설정 방법:**
+```bash
+# 환경변수에 OpenAI API 키 설정
+export OPENAI_API_KEY="your-api-key-here"
+
+# 또는 .env 파일 생성
+echo "OPENAI_API_KEY=your-api-key-here" > .env
+```
+
 ### 📋 예상 분석 결과 (demo_user)
 
 샘플 데이터는 의도적으로 **가슴 운동에 편중**되도록 생성되었습니다:
@@ -337,6 +465,7 @@ http://localhost:8000/api/analysis/comprehensive/demo_user?days=30
 ### Phase 2 (1-2개월)
 - [x] 사용자 피드백 시스템 ✅
 - [x] 운동 패턴 분석 및 인사이트 ✅
+- [x] OpenAI 기반 AI 운동 코치 ✅
 - [ ] 머신러닝 모델 통합
 - [ ] AI 영상 분석 (자세 교정)
 

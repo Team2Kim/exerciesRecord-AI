@@ -12,6 +12,10 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 # 로컬 모듈 임포트
 from models.database import get_db, create_tables, SessionLocal
@@ -26,6 +30,7 @@ from services.database_service import DatabaseService
 from services.external_api import external_api
 from services.external_recommendation import external_recommendation_service
 from services.workout_analysis import WorkoutAnalysisService
+from services.openai_service import openai_service
 
 
 # FastAPI 앱 초기화
@@ -1049,6 +1054,165 @@ async def get_comprehensive_analysis(
         raise HTTPException(
             status_code=500,
             detail=f"종합 분석 중 오류 발생: {str(e)}"
+        )
+
+
+@app.get("/api/analysis/ai-recommendation/{user_id}")
+async def get_ai_recommendation(
+    user_id: str,
+    days: int = Query(default=30, ge=1, le=365, description="분석 기간 (일)"),
+    model: str = Query(default="gpt-4o-mini", description="사용할 OpenAI 모델"),
+    db: Session = Depends(get_db)
+):
+    """
+    AI 기반 맞춤 운동 추천을 반환합니다.
+    
+    - **user_id**: 사용자 ID
+    - **days**: 분석 기간 (기본: 30일)
+    - **model**: OpenAI 모델 (기본: gpt-4o-mini)
+    
+    Returns:
+    - 운동 일지 분석 결과
+    - AI가 생성한 맞춤형 운동 조언
+    - 추천 운동 루틴
+    """
+    try:
+        # 1. 기본 분석 수행
+        analysis_service = WorkoutAnalysisService(db)
+        comprehensive = analysis_service.get_comprehensive_analysis(user_id, days)
+        
+        # 2. OpenAI AI 추천 생성
+        ai_result = openai_service.generate_workout_recommendation(comprehensive, model=model)
+        
+        # 3. 결과 통합
+        return {
+            "user_id": user_id,
+            "analysis_period": f"최근 {days}일",
+            "basic_analysis": {
+                "total_workouts": comprehensive.pattern.total_workouts,
+                "total_time": comprehensive.pattern.total_time,
+                "balance_score": comprehensive.insights.balance_score,
+                "overworked_parts": comprehensive.insights.overworked_parts,
+                "underworked_parts": comprehensive.insights.underworked_parts
+            },
+            "ai_recommendation": ai_result.get("ai_recommendation", ""),
+            "ai_success": ai_result.get("success", False),
+            "fallback_used": not ai_result.get("success", False)
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI 추천 생성 중 오류 발생: {str(e)}"
+        )
+
+
+@app.post("/api/workout-log/analyze")
+async def analyze_workout_log_with_ai(
+    workout_log: Dict[str, Any],
+    model: str = Query(default="gpt-4o-mini", description="사용할 OpenAI 모델 (gpt-4o-mini, gpt-4o, gpt-4)")
+):
+    """
+    OpenAI를 활용한 운동 일지 분석 및 평가
+    
+    - **workout_log**: 운동 일지 데이터 (JSON)
+        - date: 날짜
+        - memo: 메모
+        - exercises: 운동 목록
+    - **model**: OpenAI 모델 선택
+        - gpt-4o-mini: 가장 저렴하고 빠름 (기본값)
+        - gpt-4o: 균형잡힌 성능
+        - gpt-4: 최고 품질
+        
+    Returns:
+    - AI 분석 결과 (운동 평가, 추천사항)
+    """
+    try:
+        # OpenAI를 통한 운동 일지 분석
+        ai_analysis = openai_service.analyze_workout_log(workout_log, model=model)
+        
+        if not ai_analysis.get("success"):
+            # OpenAI 실패 시 기본 분석 제공
+            basic_analysis = await analyze_daily_workout(workout_log)
+            return {
+                "success": False,
+                "message": ai_analysis.get("message", "AI 분석 실패"),
+                "basic_analysis": basic_analysis
+            }
+        
+        # 기본 분석도 함께 제공
+        basic_analysis = await analyze_daily_workout(workout_log)
+        
+        return {
+            "success": True,
+            "ai_analysis": ai_analysis.get("analysis"),
+            "basic_analysis": basic_analysis,
+            "model": ai_analysis.get("model"),
+            "date": workout_log.get("date")
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"운동 일지 분석 중 오류 발생: {str(e)}"
+        )
+
+
+@app.post("/api/workout-log/recommend")
+async def recommend_workout_routine(
+    workout_log: Dict[str, Any],
+    days: int = Query(default=7, ge=1, le=30, description="루틴 기간 (일)"),
+    frequency: int = Query(default=4, ge=1, le=7, description="주간 운동 빈도"),
+    model: str = Query(default="gpt-4o-mini", description="사용할 OpenAI 모델")
+):
+    """
+    OpenAI를 활용한 맞춤 운동 루틴 추천
+    
+    - **workout_log**: 운동 일지 데이터 (JSON)
+    - **days**: 루틴 기간 (기본: 7일)
+    - **frequency**: 주간 운동 빈도 (기본: 4회)
+    - **model**: OpenAI 모델 (기본: gpt-4o-mini)
+    
+    Returns:
+    - AI 추천 운동 루틴
+    """
+    try:
+        # OpenAI를 통한 운동 루틴 추천
+        ai_routine = openai_service.recommend_workout_routine(
+            workout_log, 
+            days=days, 
+            frequency=frequency,
+            model=model
+        )
+        
+        if not ai_routine.get("success"):
+            raise HTTPException(
+                status_code=500,
+                detail=ai_routine.get("message", "AI 루틴 추천 실패")
+            )
+        
+        # 기본 분석도 함께 제공
+        basic_analysis = await analyze_daily_workout(workout_log)
+        
+        return {
+            "success": True,
+            "ai_routine": ai_routine.get("routine"),
+            "basic_summary": {
+                "date": workout_log.get("date"),
+                "total_exercises": len(workout_log.get("exercises", [])),
+                "summary": basic_analysis.get("summary", "")
+            },
+            "routine_period": {
+                "days": days,
+                "frequency": frequency
+            },
+            "model": ai_routine.get("model")
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"운동 루틴 추천 중 오류 발생: {str(e)}"
         )
 
 
