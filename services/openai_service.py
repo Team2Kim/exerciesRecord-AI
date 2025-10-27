@@ -51,13 +51,28 @@ class OpenAIService:
             # 분석 결과를 프롬프트로 변환
             prompt = self._create_workout_analysis_prompt(analysis_data)
             
-            # OpenAI API 호출
+            # OpenAI API 호출 - 고정된 JSON 형식
             response = self.client.chat.completions.create(
                 model=model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "당신은 전문 운동 코치입니다. 사용자의 운동 일지를 분석하여 맞춤형 조언을 제공합니다."
+                        "content": """당신은 전문 운동 코치입니다. 반드시 다음 JSON 형식으로만 응답하세요:
+
+{
+    "pattern_analysis": {
+        "strengths": "현재 운동 패턴의 장점",
+        "weaknesses": "개선이 필요한 부분"
+    },
+    "recommendations": {
+        "focus_areas": ["개선 포인트1", "개선 포인트2"],
+        "workout_routine": "추천 운동 루틴 설명",
+        "tips": "주의사항 및 부상 예방 팁"
+    },
+    "encouragement": "격려 메시지"
+}
+
+한국어로 친근하고 격려하는 톤을 유지하면서 반드시 위 JSON 구조를 따르세요."""
                     },
                     {
                         "role": "user",
@@ -65,14 +80,22 @@ class OpenAIService:
                     }
                 ],
                 temperature=0.7,
-                max_tokens=1000
+                max_tokens=1000,
+                response_format={"type": "json_object"}  # JSON 형식 고정
             )
             
             ai_recommendation = response.choices[0].message.content
             
+            # JSON 응답 파싱
+            try:
+                parsed_recommendation = json.loads(ai_recommendation)
+            except json.JSONDecodeError:
+                # JSON 파싱 실패 시 원본 문자열 반환
+                parsed_recommendation = {"raw_response": ai_recommendation}
+            
             return {
                 "success": True,
-                "ai_recommendation": ai_recommendation,
+                "ai_recommendation": parsed_recommendation,  # 파싱된 JSON 반환
                 "original_insights": {
                     "overworked_parts": analysis_data.insights.overworked_parts,
                     "underworked_parts": analysis_data.insights.underworked_parts,
@@ -109,19 +132,26 @@ class OpenAIService:
             # 로그 데이터를 프롬프트로 변환
             prompt = self._create_log_analysis_prompt(workout_log)
             
-            # OpenAI API 호출
+            # OpenAI API 호출 - 고정된 형식 사용
             response = self.client.chat.completions.create(
                 model=model,
                 messages=[
                     {
                         "role": "system",
-                        "content": """당신은 전문 운동 코치입니다. 사용자의 운동 일지를 분석하여:
-1. 운동 강도와 시간을 평가
-2. 타겟 근육과 운동의 효과를 분석
-3. 다음 운동 추천 루틴을 제안
-4. 운동 시 주의사항과 개선 포인트를 알려주세요.
+                        "content": """당신은 전문 운동 코치입니다. 반드시 다음 JSON 형식으로만 응답하세요:
 
-친근하고 격려하는 톤으로 답변하세요."""
+{
+    "workout_evaluation": "운동 강도와 시간에 대한 평가 내용",
+    "target_muscles": "타겟 근육과 효과 분석 내용",
+    "recommendations": {
+        "next_workout": "다음 운동 추천",
+        "improvements": "개선 포인트",
+        "precautions": "주의사항"
+    },
+    "encouragement": "격려 메시지"
+}
+
+친근하고 격려하는 톤을 유지하면서 반드시 위 JSON 구조를 따르세요."""
                     },
                     {
                         "role": "user",
@@ -129,14 +159,22 @@ class OpenAIService:
                     }
                 ],
                 temperature=0.8,
-                max_tokens=1500
+                max_tokens=1500,
+                response_format={"type": "json_object"}  # JSON 형식 고정
             )
             
             ai_analysis = response.choices[0].message.content
             
+            # JSON 응답 파싱
+            try:
+                parsed_analysis = json.loads(ai_analysis)
+            except json.JSONDecodeError:
+                # JSON 파싱 실패 시 원본 문자열 반환
+                parsed_analysis = {"raw_response": ai_analysis}
+            
             return {
                 "success": True,
-                "analysis": ai_analysis,
+                "analysis": parsed_analysis,  # 파싱된 JSON 반환
                 "model": model
             }
             
@@ -176,22 +214,41 @@ class OpenAIService:
             # 루틴 추천 프롬프트 생성
             prompt = self._create_routine_recommendation_prompt(workout_log, days, frequency)
             
-            # OpenAI API 호출
+            # OpenAI API 호출 - 고정된 JSON 형식
             response = self.client.chat.completions.create(
                 model=model,
                 messages=[
                     {
                         "role": "system",
-                        "content": """당신은 전문 운동 코치입니다. 사용자의 운동 기록을 분석하여 
-주 {frequency}회, {days}일 간의 맞춤 운동 루틴을 제안합니다.
+                        "content": f"""당신은 전문 운동 코치입니다. 반드시 다음 JSON 형식으로만 응답하세요:
 
-다음 형식으로 답변해주세요:
-- 운동 목표와 전체적인 방향성
-- 주간 루틴 개요 (날짜별 운동 부위)
-- 일별 상세 루틴 (운동명, 세트, 횟수, 휴식시간)
-- 주의사항과 팁
+{{
+    "workout_goal": "운동 목표와 방향성",
+    "weekly_overview": {{
+        "day_1": "첫째 날 운동 부위와 포인트",
+        "day_2": "둘째 날 운동 부위와 포인트",
+        "day_3": "셋째 날 운동 부위와 포인트",
+        "day_4": "넷째 날 운동 부위와 포인트"
+    }},
+    "daily_routines": [
+        {{
+            "day": 1,
+            "target_body_parts": ["부위1", "부위2"],
+            "exercises": [
+                {{
+                    "name": "운동명",
+                    "sets": "세트 수",
+                    "reps": "반복 횟수",
+                    "rest": "휴식 시간",
+                    "notes": "포인트"
+                }}
+            ],
+            "total_duration": "예상 시간"
+        }}
+    ],
+    "tips_and_precautions": "주의사항과 팁"
 
-구체적이고 실천 가능한 루틴을 제안해주세요."""
+구체적이고 실천 가능한 내용을 위 구조로 제시하세요."""
                     },
                     {
                         "role": "user",
@@ -199,14 +256,22 @@ class OpenAIService:
                     }
                 ],
                 temperature=0.7,
-                max_tokens=2000
+                max_tokens=2000,
+                response_format={"type": "json_object"}  # JSON 형식 고정
             )
             
             ai_routine = response.choices[0].message.content
             
+            # JSON 응답 파싱
+            try:
+                parsed_routine = json.loads(ai_routine)
+            except json.JSONDecodeError:
+                # JSON 파싱 실패 시 원본 문자열 반환
+                parsed_routine = {"raw_response": ai_routine}
+            
             return {
                 "success": True,
-                "routine": ai_routine,
+                "routine": parsed_routine,  # 파싱된 JSON 반환
                 "days": days,
                 "frequency": frequency,
                 "model": model

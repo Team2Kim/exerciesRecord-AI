@@ -18,6 +18,13 @@ CLOUDTYPE=true
 ENVIRONMENT=production
 ```
 
+### OpenAI API 설정 (필수 - AI 기능 사용시)
+```
+OPENAI_API_KEY=sk-your-api-key-here
+```
+
+⚠️ **중요**: OpenAI 기반 AI 분석 및 루틴 추천 기능을 사용하려면 이 환경변수가 반드시 필요합니다.
+
 ### 데이터베이스 설정 (필요시)
 ```
 DATABASE_URL=sqlite:///./data/fitness.db
