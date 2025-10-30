@@ -642,26 +642,18 @@ async def clear_video_cache():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"캐시 초기화 중 오류: {str(e)}")
 
-
-# ==================== 개발용 API ====================
-
-@app.post("/api/dev/reset-db")
-async def reset_database():
-    """개발용: 데이터베이스 초기화"""
+@app.get("/api/muscles")
+async def get_muscles():
+    """근육 목록 조회"""
     try:
-        # 위험한 작업이므로 개발 환경에서만 사용
-        if os.getenv("ENVIRONMENT") != "development":
-            raise HTTPException(status_code=403, detail="개발 환경에서만 사용 가능합니다")
-        
-        # 테이블 재생성 (주의: 모든 데이터 삭제됨)
-        from models.database import Base, engine
-        Base.metadata.drop_all(bind=engine)
-        create_tables()
-        
-        return {"message": "데이터베이스가 초기화되었습니다"}
+        mysql_service = MySQLService()
+        muscles = mysql_service.get_muscles()
+        return {
+            "success": True,
+            "muscles": muscles
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"초기화 중 오류: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"근육 목록 조회 중 오류: {str(e)}")
 
 # ==================== 운동 일지 분석 API ====================
 
