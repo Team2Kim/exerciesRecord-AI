@@ -31,6 +31,7 @@ from services.external_api import external_api
 from services.external_recommendation import external_recommendation_service
 from services.workout_analysis import WorkoutAnalysisService
 from services.openai_service import openai_service
+from services.mysql_service import MySQLService
 
 
 # FastAPI 앱 초기화
