@@ -4,6 +4,7 @@ uvicorn[standard]>=0.20.0
 
 # 데이터베이스
 sqlalchemy>=2.0.0
+mysql-connector-python>=9.0.0
 
 # 데이터 처리 및 검증
 pydantic>=2.0.0
