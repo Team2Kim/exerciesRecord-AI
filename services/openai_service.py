@@ -26,6 +26,98 @@ MUSCLE_LABELS: List[str] = [
     "척추세움근","큰가슴근","큰볼기근","큰원근","큰허리근","허리근","허리네모근","허리엉덩갈비근"
 ]
 
+# 일반적인 근육 이름을 정확한 MUSCLE_LABELS로 매핑하는 딕셔너리
+MUSCLE_NAME_MAPPING: Dict[str, List[str]] = {
+    # 어깨 관련
+    "어깨근육": ["어깨세모근", "어깨올림근", "어깨밑근", "중간어깨세모근"],
+    "어깨": ["어깨세모근", "어깨올림근", "어깨밑근"],
+    
+    # 팔 관련
+    "팔근육": ["위팔두갈래근", "위팔세갈래근", "위팔근", "위팔노근"],
+    "팔": ["위팔두갈래근", "위팔세갈래근", "위팔근"],
+    "삼두": ["위팔세갈래근"],
+    "이두": ["위팔두갈래근"],
+    
+    # 복근 관련
+    "복근": ["배곧은근", "배가로근", "배바깥빗근", "배속빗근"],
+    "복부": ["배곧은근", "배가로근"],
+    "코어": ["배곧은근", "배가로근", "허리근"],
+    
+    # 종아리 관련
+    "종아리근육": ["장딴지근", "장딴지세갈래근", "뒤정강근"],
+    "종아리": ["장딴지근", "장딴지세갈래근"],
+    
+    # 가슴 관련
+    "가슴": ["큰가슴근", "작은가슴근"],
+    
+    # 등 관련
+    "등": ["넓은등근", "등세모근", "등가시근"],
+    
+    # 하체 관련
+    "하체": ["넙다리네갈래근", "넙다리두갈래근", "뒤넙다리근", "큰볼기근", "중간볼기근", "작은볼기근"],
+    "허벅지": ["넙다리네갈래근", "넙다리두갈래근", "뒤넙다리근"],
+    "대퇴": ["넙다리네갈래근", "넙다리두갈래근"],
+    
+    # 허리 관련
+    "허리": ["큰허리근", "허리근", "허리네모근"],
+}
+
+
+def validate_and_map_muscles(muscle_names: List[str]) -> List[str]:
+    """
+    근육 이름 목록을 검증하고 MUSCLE_LABELS에 맞게 매핑합니다.
+    
+    Args:
+        muscle_names: 검증할 근육 이름 목록
+        
+    Returns:
+        MUSCLE_LABELS에 포함된 유효한 근육 이름 목록
+    """
+    validated_muscles = []
+    
+    for muscle in muscle_names:
+        muscle = muscle.strip()
+        
+        # 이미 MUSCLE_LABELS에 있으면 그대로 사용
+        if muscle in MUSCLE_LABELS:
+            validated_muscles.append(muscle)
+            continue
+        
+        # 매핑 딕셔너리에서 찾기
+        if muscle in MUSCLE_NAME_MAPPING:
+            # 매핑된 근육 중 첫 번째 것을 사용 (또는 모두 추가 가능)
+            mapped = MUSCLE_NAME_MAPPING[muscle]
+            validated_muscles.extend(mapped[:1])  # 첫 번째 매핑만 사용
+            continue
+        
+        # 부분 매칭으로 찾기 (예: "어깨"가 포함된 경우)
+        found = False
+        for label in MUSCLE_LABELS:
+            if muscle in label or label in muscle:
+                validated_muscles.append(label)
+                found = True
+                break
+        
+        # 매핑되지 않으면 무시 (로그는 남기지 않음)
+        if not found:
+            # 유사한 근육 찾기 (키워드 기반)
+            muscle_lower = muscle.lower()
+            for key, mapped_list in MUSCLE_NAME_MAPPING.items():
+                if key in muscle_lower or muscle_lower in key:
+                    validated_muscles.extend(mapped_list[:1])
+                    found = True
+                    break
+    
+    # 중복 제거 및 순서 유지
+    seen = set()
+    result = []
+    for muscle in validated_muscles:
+        if muscle not in seen:
+            seen.add(muscle)
+            result.append(muscle)
+    
+    return result
+
 
 class OpenAIService:
     """OpenAI API 서비스"""
@@ -87,7 +179,10 @@ class OpenAIService:
 }
 
 한국어로 친근하고 격려하는 톤을 유지하면서 반드시 위 JSON 구조를 따르세요.
-주의: next_target_muscles는 반드시 제공된 근육 라벨 목록에서만 선택하세요."""
+
+⚠️ 중요: next_target_muscles 필드는 반드시 아래 근육 라벨 목록에 정확히 포함된 이름만 사용해야 합니다.
+다른 이름(예: "어깨근육", "팔근육", "복근", "종아리근육" 등)은 절대 사용하지 마세요.
+반드시 아래 목록에서 정확한 근육명을 선택하세요."""
                     },
                     {
                         "role": "user",
@@ -104,6 +199,13 @@ class OpenAIService:
             # JSON 응답 파싱
             try:
                 parsed_recommendation = json.loads(ai_recommendation)
+                
+                # next_target_muscles 검증 및 매핑
+                if "next_target_muscles" in parsed_recommendation:
+                    original_muscles = parsed_recommendation["next_target_muscles"]
+                    if isinstance(original_muscles, list):
+                        validated_muscles = validate_and_map_muscles(original_muscles)
+                        parsed_recommendation["next_target_muscles"] = validated_muscles
             except json.JSONDecodeError:
                 # JSON 파싱 실패 시 원본 문자열 반환
                 parsed_recommendation = {"raw_response": ai_recommendation}
@@ -168,7 +270,10 @@ class OpenAIService:
 }
 
 친근하고 격려하는 톤을 유지하면서 반드시 위 JSON 구조를 따르세요.
-주의: next_target_muscles는 반드시 제공된 근육 라벨 목록에서만 선택하세요."""
+
+⚠️ 중요: next_target_muscles 필드는 반드시 아래 근육 라벨 목록에 정확히 포함된 이름만 사용해야 합니다.
+다른 이름(예: "어깨근육", "팔근육", "복근", "종아리근육" 등)은 절대 사용하지 마세요.
+반드시 아래 목록에서 정확한 근육명을 선택하세요."""
                     },
                     {
                         "role": "user",
@@ -185,6 +290,13 @@ class OpenAIService:
             # JSON 응답 파싱
             try:
                 parsed_analysis = json.loads(ai_analysis)
+                
+                # next_target_muscles 검증 및 매핑
+                if "next_target_muscles" in parsed_analysis:
+                    original_muscles = parsed_analysis["next_target_muscles"]
+                    if isinstance(original_muscles, list):
+                        validated_muscles = validate_and_map_muscles(original_muscles)
+                        parsed_analysis["next_target_muscles"] = validated_muscles
             except json.JSONDecodeError:
                 # JSON 파싱 실패 시 원본 문자열 반환
                 parsed_analysis = {"raw_response": ai_analysis}
@@ -284,6 +396,13 @@ class OpenAIService:
             # JSON 응답 파싱
             try:
                 parsed_routine = json.loads(ai_routine)
+                
+                # next_target_muscles 검증 및 매핑
+                if "next_target_muscles" in parsed_routine:
+                    original_muscles = parsed_routine["next_target_muscles"]
+                    if isinstance(original_muscles, list):
+                        validated_muscles = validate_and_map_muscles(original_muscles)
+                        parsed_routine["next_target_muscles"] = validated_muscles
             except json.JSONDecodeError:
                 # JSON 파싱 실패 시 원본 문자열 반환
                 parsed_routine = {"raw_response": ai_routine}
