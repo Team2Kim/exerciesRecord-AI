@@ -4,7 +4,7 @@ FastAPI 메인 서버 애플리케이션
 """
 
 import os
-from typing import Dict, Any
+from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -395,6 +395,47 @@ async def recommend_workout_routine(
             status_code=500,
             detail=f"운동 루틴 추천 중 오류 발생: {str(e)}"
         )
+
+
+@app.post("/api/workout-log/weekly-pattern")
+async def analyze_weekly_workout_pattern(
+    payload: Dict[str, Any],
+    model: str = Query(default="gpt-4o-mini", description="사용할 OpenAI 모델")
+):
+    """
+    최근 7일간의 운동 데이터를 분석하여 패턴과 루틴을 추천합니다.
+
+    - **payload.weekly_logs**: 최근 7일 운동 일지 리스트 (최신순/과거순 무관)
+    - **model**: OpenAI 모델 (기본: gpt-4o-mini)
+
+    Returns:
+    - AI 패턴 분석 및 추천 루틴
+    """
+
+    weekly_logs: List[Dict[str, Any]] = payload.get("weekly_logs") or payload.get("logs")
+
+    if not isinstance(weekly_logs, list) or not weekly_logs:
+        raise HTTPException(
+            status_code=400,
+            detail="최근 7일 운동 기록(weekly_logs)이 필요합니다."
+        )
+
+    trimmed_logs = weekly_logs[:7]
+
+    ai_result = openai_service.analyze_weekly_pattern_and_recommend(trimmed_logs, model=model)
+
+    if not ai_result.get("success"):
+        raise HTTPException(
+            status_code=500,
+            detail=ai_result.get("message", "AI 패턴 분석 실패")
+        )
+
+    return {
+        "success": True,
+        "ai_pattern": ai_result.get("result"),
+        "model": ai_result.get("model"),
+        "records_analyzed": len(trimmed_logs)
+    }
 
 
 # ==================== 서버 실행 ====================
