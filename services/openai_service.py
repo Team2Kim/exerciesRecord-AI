@@ -710,7 +710,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
         for log in weekly_logs:
             exercises = log.get("exercises", [])
-            if exercises:
+            # exercises가 리스트이고 비어있지 않은 경우에만 운동일로 카운트
+            has_workout = isinstance(exercises, list) and len(exercises) > 0
+            
+            if has_workout:
                 active_days += 1
 
             for ex in exercises:
@@ -733,9 +736,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             for name, count in sorted(muscle_counts.items(), key=lambda item: item[1], reverse=True)
         ]
 
+        # 주간 분석이므로 총 일수는 항상 7일로 고정
+        rest_days = max(0, 7 - active_days)
+
         return {
             "weekly_workout_count": active_days,
-            "rest_days": max(0, len(weekly_logs) - active_days),
+            "rest_days": rest_days,
             "total_minutes": total_minutes,
             "intensity_counts": intensity_counts,
             "body_part_counts": body_part_counts,
