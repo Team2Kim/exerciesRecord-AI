@@ -433,6 +433,7 @@ async def analyze_weekly_workout_pattern(
     return {
         "success": True,
         "ai_pattern": ai_result.get("result"),
+        "metrics_summary": ai_result.get("metrics_summary"),
         "model": ai_result.get("model"),
         "records_analyzed": len(trimmed_logs)
     }
