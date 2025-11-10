@@ -709,18 +709,25 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         active_days = 0
 
         for log in weekly_logs:
-            exercises = log.get("exercises", [])
-            # exercises가 리스트이고 비어있지 않은 경우에만 운동일로 카운트
-            has_workout = isinstance(exercises, list) and len(exercises) > 0
-            
-            if has_workout:
+            raw_exercises = log.get("exercises")
+
+            if isinstance(raw_exercises, list):
+                exercises = [ex for ex in raw_exercises if isinstance(ex, dict)]
+            elif isinstance(raw_exercises, dict):
+                exercises = [raw_exercises]
+            else:
+                exercises = []
+
+            if exercises:
                 active_days += 1
 
             for ex in exercises:
                 intensity = ex.get("intensity", "중")
                 if intensity not in intensity_counts:
-                    intensity_counts[intensity] = 0
-                intensity_counts[intensity] += 1
+                    intensity_counts.setdefault("기타", 0)
+                    intensity_counts["기타"] += 1
+                else:
+                    intensity_counts[intensity] += 1
 
                 total_minutes += ex.get("exerciseTime", 0)
 
