@@ -61,18 +61,28 @@ class ExerciseRAGService:
         for score, idx in zip(scores[0], indices[0]):
             if idx < 0 or idx >= len(self.metadata):
                 continue
-            metadata = self.metadata[idx]
+            meta = self.metadata[idx]
+            metadata = {
+                "title": meta.get("title"),
+                "standard_title": meta.get("standard_title"),
+                "training_name": meta.get("training_name"),
+                "body_part": meta.get("body_part"),
+                "exercise_tool": meta.get("exercise_tool"),
+                "fitness_factor_name": meta.get("fitness_factor_name"),
+                "fitness_level_name": meta.get("fitness_level_name"),
+                "target_group": meta.get("target_group"),
+                "training_aim_name": meta.get("training_aim_name"),
+                "training_place_name": meta.get("training_place_name"),
+                "training_section_name": meta.get("training_section_name"),
+                "training_step_name": meta.get("training_step_name"),
+                "description": meta.get("description"),
+                "video_url": meta.get("video_url"),
+                "image_url": meta.get("image_url"),
+            }
             results.append(
                 {
                     "score": float(score),
-                    "title": metadata.get("title"),
-                    "standard_title": metadata.get("standard_title"),
-                    "training_name": metadata.get("training_name"),
-                    "body_part": metadata.get("body_part"),
-                    "exercise_tool": metadata.get("exercise_tool"),
-                    "description": metadata.get("description"),
-                    "video_url": metadata.get("video_url"),
-                    "image_url": metadata.get("image_url"),
+                    "metadata": metadata,
                 }
             )
 

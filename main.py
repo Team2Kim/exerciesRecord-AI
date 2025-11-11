@@ -339,65 +339,6 @@ async def analyze_workout_log_with_ai(
         )
 
 
-@app.post("/api/workout-log/recommend")
-async def recommend_workout_routine(
-    workout_log: Dict[str, Any],
-    days: int = Query(default=7, ge=1, le=30, description="루틴 기간 (일)"),
-    frequency: int = Query(default=4, ge=1, le=7, description="주간 운동 빈도"),
-    model: str = Query(default="gpt-4o-mini", description="사용할 OpenAI 모델")
-):
-    """
-    OpenAI를 활용한 맞춤 운동 루틴 추천
-    
-    - **workout_log**: 운동 일지 데이터 (JSON)
-    - **days**: 루틴 기간 (기본: 7일)
-    - **frequency**: 주간 운동 빈도 (기본: 4회)
-    - **model**: OpenAI 모델 (기본: gpt-4o-mini)
-    
-    Returns:
-    - AI 추천 운동 루틴
-    """
-    try:
-        # OpenAI를 통한 운동 루틴 추천
-        ai_routine = openai_service.recommend_workout_routine(
-            workout_log, 
-            days=days, 
-            frequency=frequency,
-            model=model
-        )
-        
-        if not ai_routine.get("success"):
-            raise HTTPException(
-                status_code=500,
-                detail=ai_routine.get("message", "AI 루틴 추천 실패")
-            )
-        
-        # 기본 분석도 함께 제공
-        basic_analysis = await analyze_daily_workout(workout_log)
-        
-        return {
-            "success": True,
-            "ai_routine": ai_routine.get("routine"),
-            "rag_sources": ai_routine.get("rag_sources"),
-            "basic_summary": {
-                "date": workout_log.get("date"),
-                "total_exercises": len(workout_log.get("exercises", [])),
-                "summary": basic_analysis.get("summary", "")
-            },
-            "routine_period": {
-                "days": days,
-                "frequency": frequency
-            },
-            "model": ai_routine.get("model")
-        }
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"운동 루틴 추천 중 오류 발생: {str(e)}"
-        )
-
-
 @app.post("/api/workout-log/weekly-pattern")
 async def analyze_weekly_workout_pattern(
     payload: Dict[str, Any],
@@ -435,6 +376,7 @@ async def analyze_weekly_workout_pattern(
         "success": True,
         "ai_pattern": ai_result.get("result"),
         "metrics_summary": ai_result.get("metrics_summary"),
+        "rag_sources": ai_result.get("rag_sources", []),
         "model": ai_result.get("model"),
         "records_analyzed": len(trimmed_logs)
     }
