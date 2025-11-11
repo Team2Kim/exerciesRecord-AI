@@ -6,6 +6,10 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 from openai import OpenAI
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 try:
     import faiss  # type: ignore

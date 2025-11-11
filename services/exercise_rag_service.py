@@ -71,6 +71,8 @@ class ExerciseRAGService:
                     "body_part": metadata.get("body_part"),
                     "exercise_tool": metadata.get("exercise_tool"),
                     "description": metadata.get("description"),
+                    "video_url": metadata.get("video_url"),
+                    "image_url": metadata.get("image_url"),
                 }
             )
 

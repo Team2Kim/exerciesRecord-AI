@@ -79,6 +79,8 @@ TEXT_FIELDS = [
     "training_section_name",
     "training_step_name",
     "description",
+    "image_url",
+    "video_url",
 ]
 
 
@@ -113,6 +115,8 @@ def build_chunk(row: Dict[str, str]) -> str:
         append(f"훈련 단계: {row['training_step_name']}")
     if row.get("description"):
         append(f"설명: {row['description']}")
+    if row.get("video_url"):
+        append(f"영상 링크: {row['video_url']}")
 
     return "\n".join(lines)
 
