@@ -9,6 +9,7 @@ import json
 from typing import Optional, Dict, Any, List, Tuple
 from models.schemas import ComprehensiveAnalysis
 from dotenv import load_dotenv
+from services.exercise_rag_service import get_exercise_rag_service, ExerciseRAGService
 
 # .env 파일 로드
 load_dotenv()
@@ -126,6 +127,13 @@ class OpenAIService:
         # API 키는 환경변수에서 로드하는 것이 안전합니다
         api_key = os.getenv("OPENAI_API_KEY", "")
         self.client = OpenAI(api_key=api_key) if api_key else None
+        self.exercise_rag: Optional[ExerciseRAGService] = None
+        self.exercise_rag_error: Optional[str] = None
+
+        try:
+            self.exercise_rag = get_exercise_rag_service()
+        except Exception as exc:
+            self.exercise_rag_error = str(exc)
         
     def generate_workout_recommendation(
         self, 
@@ -343,8 +351,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             }
         
         try:
+            rag_candidates = self._get_rag_candidates_for_routine(workout_log, frequency)
+
             # 루틴 추천 프롬프트 생성
-            prompt = self._create_routine_recommendation_prompt(workout_log, days, frequency)
+            prompt = self._create_routine_recommendation_prompt(
+                workout_log, days, frequency, rag_candidates
+            )
             
             # OpenAI API 호출 - 고정된 JSON 형식
             response = self.client.chat.completions.create(
@@ -415,7 +427,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 "routine": parsed_routine,  # 파싱된 JSON 반환
                 "days": days,
                 "frequency": frequency,
-                "model": model
+                "model": model,
+                "rag_sources": rag_candidates
             }
             
         except Exception as e:
@@ -603,12 +616,58 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 친근하고 격려하는 톤으로 작성해주세요."""
         
         return prompt
+
+    def _get_rag_candidates_for_routine(
+        self,
+        workout_log: Dict[str, Any],
+        frequency: int,
+        top_k: int = 6
+    ) -> List[Dict[str, Any]]:
+        if not self.exercise_rag:
+            return []
+
+        query = self._build_rag_query(workout_log, frequency)
+        if not query:
+            return []
+
+        try:
+            return self.exercise_rag.search(query, top_k=top_k)
+        except Exception:
+            return []
+
+    def _build_rag_query(self, workout_log: Dict[str, Any], frequency: int) -> str:
+        exercises = workout_log.get("exercises") or []
+        muscles: List[str] = []
+        body_parts: List[str] = []
+
+        for ex in exercises:
+            if not isinstance(ex, dict):
+                continue
+            exercise_info = ex.get("exercise", {}) or {}
+            muscles.extend(exercise_info.get("muscles", []) or [])
+            body_part = exercise_info.get("bodyPart")
+            if body_part:
+                body_parts.append(body_part)
+
+        muscles = [m for m in {m for m in muscles if m}]
+        body_parts = [bp for bp in {bp for bp in body_parts if bp}]
+
+        focus_clause = ""
+        if body_parts:
+            focus_clause = f"주요 운동 부위: {', '.join(body_parts)}. "
+        elif muscles:
+            focus_clause = f"목표 근육: {', '.join(muscles)}. "
+
+        frequency_clause = f"주 {frequency}회 루틴에 적합한 운동을 추천."
+
+        return f"{focus_clause}{frequency_clause}".strip()
     
     def _create_routine_recommendation_prompt(
         self, 
         workout_log: Dict[str, Any], 
         days: int, 
-        frequency: int
+        frequency: int,
+        rag_candidates: Optional[List[Dict[str, Any]]] = None
     ) -> str:
         """운동 루틴 추천을 위한 프롬프트 생성"""
         
@@ -640,6 +699,22 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 - 안전하고 실천 가능한 루틴
 
 상세한 운동명, 세트, 횟수, 휴식시간까지 포함해주세요.
+
+[추천 후보 운동 데이터]
+"""
+
+        if rag_candidates:
+            for item in rag_candidates:
+                prompt += (
+                    f"- 운동명: {item.get('title') or item.get('standard_title') or 'N/A'} | "
+                    f"부위: {item.get('body_part', '정보 없음')} | "
+                    f"도구: {item.get('exercise_tool', '정보 없음')} | "
+                    f"설명: {item.get('description', '설명 없음')}\n"
+                )
+        else:
+            prompt += "- 관련 운동 데이터를 찾지 못했습니다.\n"
+
+        prompt += f"""
 
 [근육 라벨 목록]
 아래 목록에 포함된 근육명만 사용하여 다음 운동을 추천할 근육(next_target_muscles)을 2~5개 선정하세요.

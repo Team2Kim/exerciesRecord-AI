@@ -378,6 +378,7 @@ async def recommend_workout_routine(
         return {
             "success": True,
             "ai_routine": ai_routine.get("routine"),
+            "rag_sources": ai_routine.get("rag_sources"),
             "basic_summary": {
                 "date": workout_log.get("date"),
                 "total_exercises": len(workout_log.get("exercises", [])),
