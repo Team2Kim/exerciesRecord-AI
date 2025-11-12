@@ -415,8 +415,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
     "next_target_muscles": ["근육명1", "근육명2", "근육명3"]
 }}
 
-⚠️ 중요 지침:
-- video_url, body_part, exercise_tool, description, image_url 및 기타 메타데이터는 반드시 제공된 후보 운동 데이터(JSON)에서만 가져오세요. 새로운 값을 만들지 마세요.
+⚠️ 매우 중요 - RAG 후보 데이터 사용 규칙:
+- daily_routines[].exercises[] 및 suggested_exercises[] 항목을 작성할 때는 반드시 사용자 프롬프트에 제공된 "[추천 후보 운동 데이터(JSON)]" 배열에 있는 운동만 사용하세요.
+- 위 배열에 없는 운동명, video_url, image_url 등을 절대 임의로 생성하거나 만들어내지 마세요.
+- 각 운동의 모든 필드(video_url, title, standard_title, body_part, exercise_tool, description, muscles 등)는 반드시 제공된 JSON 배열에서 가져온 값을 그대로 사용하세요.
+- video_url과 title/standard_title의 쌍은 제공된 JSON에서 정확히 일치하는 것을 사용하세요.
+- exercises 배열의 name 필드는 title 또는 standard_title 값을 사용하세요.
 - 후보 운동 데이터를 참고해 루틴을 구성하고, 선택한 이유를 reference_videos/suggested_exercises에 명시하세요.
 - next_target_muscles는 제공된 근육 라벨 목록에서만 선택하세요.
 - JSON 형식을 엄격히 지키고, 누락된 필드가 없도록 하세요."""
@@ -586,17 +590,19 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 "focus": "주요 부위 및 목표",
                 "exercises": [
                     {{
-                        "name": "운동명",
-                        "standard_title": "후보 운동의 표준 제목",
+                        "name": "운동명 (후보 데이터의 title 또는 standard_title 사용)",
+                        "title": "후보 데이터의 title 값",
+                        "standard_title": "후보 데이터의 standard_title 값",
                         "sets": "세트 수",
                         "reps": "반복 수",
                         "rest": "휴식 시간",
                         "notes": "폼 또는 강도 조절 팁",
-                        "body_part": "타겟 부위",
-                        "exercise_tool": "사용 도구",
-                        "description": "운동 설명",
-                        "video_url": "영상 링크 (제공된 후보 데이터에서만 사용)",
-                        "image_url": "이미지 링크 (있다면 후보 데이터에서만 사용)"
+                        "body_part": "후보 데이터의 body_part 값 (그대로 사용)",
+                        "exercise_tool": "후보 데이터의 exercise_tool 값 (그대로 사용)",
+                        "description": "후보 데이터의 description 값 (그대로 사용)",
+                        "muscles": "후보 데이터의 muscles 값 (그대로 사용)",
+                        "video_url": "후보 데이터의 video_url 값 (반드시 제공된 값만 사용)",
+                        "image_url": "후보 데이터의 image_url 값 (있다면 제공된 값만 사용)"
                     }}
                 ],
                 "estimated_duration": "예상 소요 시간"
@@ -610,6 +616,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 }}
 
 친근하고 격려하는 톤을 유지하면서 반드시 위 JSON 구조를 따르세요.
+
+⚠️ 매우 중요 - RAG 후보 데이터 사용 규칙:
+- recommended_routine.daily_details[].exercises[] 항목을 작성할 때는 반드시 사용자 프롬프트에 제공된 "[추천 후보 운동 데이터(JSON)]" 배열에 있는 운동만 사용하세요.
+- 위 배열에 없는 운동명, video_url, image_url 등을 절대 임의로 생성하거나 만들어내지 마세요.
+- 각 운동의 모든 필드(video_url, title, standard_title, body_part, exercise_tool, description, muscles 등)는 반드시 제공된 JSON 배열에서 가져온 값을 그대로 사용하세요.
+- video_url과 title/standard_title의 쌍은 제공된 JSON에서 정확히 일치하는 것을 사용하세요.
 
 ⚠️ 중요: next_target_muscles, muscle_balance.overworked, muscle_balance.underworked 필드는 반드시 아래 근육 라벨 목록에 정확히 포함된 이름만 사용해야 합니다.
 다른 이름(예: "어깨근육", "팔근육", "복근" 등)은 절대 사용하지 마세요.
@@ -777,7 +789,31 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         
         unique_muscles = list(set(muscle_groups))
         
-        candidate_json = json.dumps(rag_candidates, ensure_ascii=False, indent=2) if rag_candidates else "[]"
+        # RAG 후보 데이터를 메타데이터만 추출하여 포맷팅
+        candidate_payload = []
+        if rag_candidates:
+            for item in rag_candidates:
+                meta = item.get("metadata", {}) or {}
+                candidate_payload.append({
+                    "score": item.get("score"),
+                    "title": meta.get("title"),
+                    "standard_title": meta.get("standard_title"),
+                    "training_name": meta.get("training_name"),
+                    "body_part": meta.get("body_part"),
+                    "exercise_tool": meta.get("exercise_tool"),
+                    "fitness_factor_name": meta.get("fitness_factor_name"),
+                    "fitness_level_name": meta.get("fitness_level_name"),
+                    "target_group": meta.get("target_group"),
+                    "training_aim_name": meta.get("training_aim_name"),
+                    "training_place_name": meta.get("training_place_name"),
+                    "training_section_name": meta.get("training_section_name"),
+                    "training_step_name": meta.get("training_step_name"),
+                    "description": meta.get("description"),
+                    "muscles": meta.get("muscles"),  # 근육 정보 추가
+                    "video_url": meta.get("video_url"),
+                    "image_url": meta.get("image_url"),
+                })
+        candidate_json = json.dumps(candidate_payload, ensure_ascii=False, indent=2)
 
         prompt = f"""
 사용자의 최근 운동 기록:
@@ -798,6 +834,14 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
 [추천 후보 운동 데이터(JSON)]
 {candidate_json}
+
+⚠️ 매우 중요: daily_routines[].exercises[] 및 suggested_exercises[] 항목을 작성할 때는 반드시 위 JSON 배열에 있는 운동 데이터만 사용하세요.
+- exercises 배열의 각 항목은 위 JSON 배열의 항목 중 하나를 선택하여 사용해야 합니다.
+- name 필드는 title 또는 standard_title 값을 사용하세요.
+- video_url, image_url, body_part, exercise_tool, description, muscles 등 모든 필드는 위 JSON에서 제공된 값을 그대로 사용하세요.
+- 위 JSON에 없는 운동명, video_url, image_url 등을 임의로 생성하거나 만들어내지 마세요.
+- 위 JSON 배열에 있는 운동만 추천하고, 배열에 없는 운동은 절대 추가하지 마세요.
+- 각 운동의 video_url과 title/standard_title은 반드시 위 JSON에서 제공된 쌍을 그대로 사용하세요.
 
 [근육 라벨 목록]
 아래 목록에 포함된 근육명만 사용하여 다음 운동을 추천할 근육(next_target_muscles)을 2~5개 선정하세요.
@@ -1044,6 +1088,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     "training_section_name": meta.get("training_section_name"),
                     "training_step_name": meta.get("training_step_name"),
                     "description": meta.get("description"),
+                    "muscles": meta.get("muscles"),  # 근육 정보 추가
                     "video_url": meta.get("video_url"),
                     "image_url": meta.get("image_url"),
                 }
@@ -1052,10 +1097,13 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         rag_section = (
             "\n\n[추천 후보 운동 데이터(JSON)]\n"
             f"{json.dumps(candidate_payload, ensure_ascii=False, indent=2)}\n\n"
-            "위 JSON에 포함된 운동 메타데이터를 그대로 활용하여 "
-            "recommended_routine.daily_details[].exercises[] 항목에 "
-            "video_url뿐 아니라 body_part, exercise_tool, description, image_url 등 모든 정보를 포함하세요. "
-            "JSON에 없는 데이터는 임의로 생성하지 마세요.\n"
+            "⚠️ 매우 중요: recommended_routine.daily_details[].exercises[] 항목을 작성할 때는 반드시 위 JSON 배열에 있는 운동 데이터만 사용하세요.\n"
+            "- exercises 배열의 각 항목은 위 JSON 배열의 항목 중 하나를 선택하여 사용해야 합니다.\n"
+            "- name 필드는 title 또는 standard_title 값을 사용하세요.\n"
+            "- video_url, image_url, body_part, exercise_tool, description, muscles 등 모든 필드는 위 JSON에서 제공된 값을 그대로 사용하세요.\n"
+            "- 위 JSON에 없는 운동명, video_url, image_url 등을 임의로 생성하거나 만들어내지 마세요.\n"
+            "- 위 JSON 배열에 있는 운동만 추천하고, 배열에 없는 운동은 절대 추가하지 마세요.\n"
+            "- 각 운동의 video_url과 title/standard_title은 반드시 위 JSON에서 제공된 쌍을 그대로 사용하세요.\n"
         )
 
         return prompt + rag_section
