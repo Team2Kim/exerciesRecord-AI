@@ -63,6 +63,7 @@ class ExerciseRAGService:
                 continue
             meta = self.metadata[idx]
             metadata = {
+                "exercise_id": meta.get("exercise_id"),
                 "title": meta.get("title"),
                 "standard_title": meta.get("standard_title"),
                 "training_name": meta.get("training_name"),
@@ -78,7 +79,9 @@ class ExerciseRAGService:
                 "description": meta.get("description"),
                 "muscles": meta.get("muscles"),  # 근육 정보 추가
                 "video_url": meta.get("video_url"),
+                "video_length_seconds": meta.get("video_length_seconds"),
                 "image_url": meta.get("image_url"),
+                "image_file_name": meta.get("image_file_name"),
             }
             results.append(
                 {

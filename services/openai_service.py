@@ -838,6 +838,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     "video_url": meta.get("video_url"),
                     "video_length_seconds": meta.get("video_length_seconds"),  # video_length_seconds 추가
                     "image_url": meta.get("image_url"),
+                    "image_file_name": meta.get("image_file_name"),  # image_file_name 추가
                 })
         candidate_json = json.dumps(candidate_payload, ensure_ascii=False, indent=2)
 

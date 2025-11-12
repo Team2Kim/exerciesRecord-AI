@@ -89,6 +89,7 @@ TEXT_FIELDS = [
 METADATA_ONLY_FIELDS = [
     "exercise_id",
     "video_length_seconds",
+    "image_file_name",
 ]
 
 
