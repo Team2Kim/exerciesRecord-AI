@@ -85,6 +85,12 @@ TEXT_FIELDS = [
     "muscles",  # 근육 정보 추가
 ]
 
+# 메타데이터에만 포함되는 필드 (임베딩 텍스트에는 포함하지 않음)
+METADATA_ONLY_FIELDS = [
+    "exercise_id",
+    "video_length_seconds",
+]
+
 
 def build_chunk(row: Dict[str, str]) -> str:
     lines: List[str] = []
@@ -127,7 +133,9 @@ def build_chunk(row: Dict[str, str]) -> str:
 
 def preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # Keep only relevant columns to reduce noise.
-    available_cols = [col for col in TEXT_FIELDS if col in df.columns]
+    # TEXT_FIELDS는 임베딩 텍스트에 사용, METADATA_ONLY_FIELDS는 메타데이터에만 사용
+    all_fields = TEXT_FIELDS + METADATA_ONLY_FIELDS
+    available_cols = [col for col in all_fields if col in df.columns]
     subset = df[available_cols].copy()
 
     subset["chunk_text"] = subset.apply(lambda row: build_chunk(row.to_dict()), axis=1)
@@ -141,14 +149,20 @@ def export_jsonl(df: pd.DataFrame, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as fh:
         for idx, row in df.iterrows():
+            # TEXT_FIELDS와 METADATA_ONLY_FIELDS 모두 메타데이터에 포함
+            all_metadata_fields = TEXT_FIELDS + METADATA_ONLY_FIELDS
+            metadata = {}
+            for key in all_metadata_fields:
+                if key in row:
+                    value = row.get(key)
+                    # 빈 문자열이 아닌 경우만 포함
+                    if value and str(value).strip():
+                        metadata[key] = value
+            
             record = {
                 "id": idx,
                 "text": row["chunk_text"],
-                "metadata": {
-                    key: row.get(key, "")
-                    for key in TEXT_FIELDS
-                    if key in row and row.get(key)
-                },
+                "metadata": metadata,
             }
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
 
