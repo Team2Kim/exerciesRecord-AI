@@ -156,8 +156,8 @@ def export_jsonl(df: pd.DataFrame, output_path: Path) -> None:
             for key in all_metadata_fields:
                 if key in row:
                     value = row.get(key)
-                    # 빈 문자열이 아닌 경우만 포함
-                    if value and str(value).strip():
+                    # NULL 문자열이나 빈 문자열이 아닌 경우만 포함
+                    if value and str(value).strip() and str(value).strip().upper() != "NULL":
                         metadata[key] = value
             
             record = {
