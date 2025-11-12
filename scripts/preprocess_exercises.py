@@ -10,12 +10,12 @@ import pandas as pd
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Preprocess exercises_with_standard_titles.csv for RAG ingestion."
+        description="Preprocess exercise CSV file for RAG ingestion."
     )
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path("exercises_with_standard_titles.csv"),
+        default=Path("exercises_muscle.csv"),
         help="Path to the raw CSV file.",
     )
     parser.add_argument(
@@ -60,7 +60,8 @@ def load_dataframe(csv_path: Path, encoding: Optional[str]) -> pd.DataFrame:
         raise RuntimeError(f"Failed to read CSV with encoding {enc}") from exc
 
     # Strip whitespace and normalise empty strings.
-    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    for col in df.columns:
+        df[col] = df[col].apply(lambda x: x.strip() if isinstance(x, str) else x)
     df = df.fillna("")
     return df
 
@@ -81,6 +82,7 @@ TEXT_FIELDS = [
     "description",
     "image_url",
     "video_url",
+    "muscles",  # 근육 정보 추가
 ]
 
 
@@ -115,6 +117,8 @@ def build_chunk(row: Dict[str, str]) -> str:
         append(f"훈련 단계: {row['training_step_name']}")
     if row.get("description"):
         append(f"설명: {row['description']}")
+    if row.get("muscles"):
+        append(f"타겟 근육: {row['muscles']}")
     if row.get("video_url"):
         append(f"영상 링크: {row['video_url']}")
 

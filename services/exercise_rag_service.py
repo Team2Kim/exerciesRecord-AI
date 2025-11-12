@@ -76,6 +76,7 @@ class ExerciseRAGService:
                 "training_section_name": meta.get("training_section_name"),
                 "training_step_name": meta.get("training_step_name"),
                 "description": meta.get("description"),
+                "muscles": meta.get("muscles"),  # 근육 정보 추가
                 "video_url": meta.get("video_url"),
                 "image_url": meta.get("image_url"),
             }

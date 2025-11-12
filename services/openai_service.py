@@ -495,6 +495,16 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     body_part_counts = metrics.get("body_part_counts", {})
                     top_muscles = metrics.get("top_muscles", [])
                     
+                    # 모든 근육 사용량 계산 (부족한 근육 찾기용)
+                    all_muscle_counts = {}
+                    for log in weekly_logs:
+                        exercises = log.get("exercises", [])
+                        for ex in exercises:
+                            if isinstance(ex, dict):
+                                exercise_info = ex.get("exercise", {}) or {}
+                                for muscle in exercise_info.get("muscles", []) or []:
+                                    all_muscle_counts[muscle] = all_muscle_counts.get(muscle, 0) + 1
+                    
                     # 여러 쿼리로 검색하여 다양한 운동 후보 수집
                     queries = []
                     
@@ -505,19 +515,27 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                             least_used = sorted_parts[0][0]
                             queries.append(f"{least_used} 운동 추천")
                     
-                    # 2. 많이 사용된 근육의 보완 운동
+                    # 2. 적게 사용된 근육 기반 (muscles 필드 활용)
+                    if all_muscle_counts:
+                        sorted_muscles = sorted(all_muscle_counts.items(), key=lambda x: x[1])
+                        # 가장 적게 사용된 근육 2개 선택
+                        for muscle_name, count in sorted_muscles[:2]:
+                            if count <= 1:  # 1회 이하로 사용된 근육
+                                queries.append(f"{muscle_name} 운동")
+                    
+                    # 3. 많이 사용된 근육의 보완 운동
                     if top_muscles:
                         top_muscle = top_muscles[0].get("name", "")
                         if top_muscle:
                             queries.append(f"{top_muscle} 보완 운동")
                     
-                    # 3. 전신 균형 운동
+                    # 4. 전신 균형 운동
                     queries.append("전신 균형 운동")
                     
                     # 여러 쿼리로 검색하여 중복 제거
                     all_candidates = []
                     seen_titles = set()
-                    for query in queries[:3]:  # 최대 3개 쿼리
+                    for query in queries[:5]:  # 최대 5개 쿼리 (근육 기반 검색 추가로 증가)
                         results = self.exercise_rag.search(query, top_k=5)
                         for item in results:
                             meta = item.get("metadata", {}) or {}
