@@ -1102,7 +1102,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             candidate_payload.append(
                 {
                     "score": item.get("score"),
-                    "exercise_id": meta.get("exercise_id"),  # exercise_id 추가
+                    "exercise_id": meta.get("exercise_id"),
                     "title": meta.get("title"),
                     "standard_title": meta.get("standard_title"),
                     "training_name": meta.get("training_name"),
@@ -1118,8 +1118,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     "description": meta.get("description"),
                     "muscles": meta.get("muscles"),  # 근육 정보 추가
                     "video_url": meta.get("video_url"),
-                    "video_length_seconds": meta.get("video_length_seconds"),  # video_length_seconds 추가
+                    "video_length_seconds": meta.get("video_length_seconds"),  
                     "image_url": meta.get("image_url"),
+                    "image_file_name": meta.get("image_file_name"), # image_file_name 추가
                 }
             )
 
