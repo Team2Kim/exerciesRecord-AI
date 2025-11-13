@@ -911,6 +911,39 @@ async def exercise_admin_page():
             border-radius: 8px;
             margin-bottom: 20px;
         }
+        
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-weight: bold;
+            z-index: 2000;
+            animation: slideIn 0.3s ease-out;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .toast.success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .toast.error {
+            background: #dc3545;
+            color: white;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1107,11 +1140,29 @@ async def exercise_admin_page():
             }
         }
         
+        // 원래 데이터 저장용
+        let originalData = {};
+        
         function startEdit(exerciseId) {
             const card = document.getElementById(`card-${exerciseId}`);
             const viewMode = document.getElementById(`view-mode-${exerciseId}`);
             const editMode = document.getElementById(`edit-mode-${exerciseId}`);
             const actions = document.getElementById(`actions-${exerciseId}`);
+            
+            // 현재 데이터 저장
+            const titleInput = document.getElementById(`edit-title-${exerciseId}`);
+            const standardTitleInput = document.getElementById(`edit-standard-title-${exerciseId}`);
+            const videoUrlInput = document.getElementById(`edit-video-url-${exerciseId}`);
+            const imageUrlInput = document.getElementById(`edit-image-url-${exerciseId}`);
+            const imageFileNameInput = document.getElementById(`edit-image-filename-${exerciseId}`);
+            
+            originalData[exerciseId] = {
+                title: titleInput.value,
+                standardTitle: standardTitleInput.value,
+                videoUrl: videoUrlInput.value,
+                imageUrl: imageUrlInput.value,
+                imageFileName: imageFileNameInput.value
+            };
             
             card.classList.add('editing');
             viewMode.style.display = 'none';
@@ -1126,12 +1177,34 @@ async def exercise_admin_page():
             const actions = document.getElementById(`actions-${exerciseId}`);
             
             // 원래 데이터로 복원
-            loadExercises();
+            if (originalData[exerciseId]) {
+                const data = originalData[exerciseId];
+                document.getElementById(`edit-title-${exerciseId}`).value = data.title;
+                document.getElementById(`edit-standard-title-${exerciseId}`).value = data.standardTitle;
+                document.getElementById(`edit-video-url-${exerciseId}`).value = data.videoUrl;
+                document.getElementById(`edit-image-url-${exerciseId}`).value = data.imageUrl;
+                document.getElementById(`edit-image-filename-${exerciseId}`).value = data.imageFileName;
+                delete originalData[exerciseId];
+            }
             
             card.classList.remove('editing');
             viewMode.style.display = 'block';
             editMode.style.display = 'none';
             actions.style.display = 'flex';
+        }
+        
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideIn 0.3s ease-out reverse';
+                setTimeout(() => {
+                    document.body.removeChild(toast);
+                }, 300);
+            }, 3000);
         }
         
         async function saveExercise(exerciseId) {
@@ -1157,7 +1230,7 @@ async def exercise_admin_page():
             });
             
             if (Object.keys(updateData).length === 0) {
-                alert('수정할 내용이 없습니다.');
+                showToast('수정할 내용이 없습니다.', 'error');
                 return;
             }
             
@@ -1173,14 +1246,100 @@ async def exercise_admin_page():
                 const data = await response.json();
                 
                 if (data.success) {
-                    // 성공 시 목록 새로고침
-                    await loadExercises();
+                    // 화면만 업데이트 (리로드 없이)
+                    updateExerciseCard(exerciseId, {
+                        title: title,
+                        standard_title: standardTitle,
+                        video_url: videoUrl,
+                        image_url: imageUrl,
+                        image_file_name: imageFileName
+                    });
+                    
+                    // 편집 모드 종료
+                    const card = document.getElementById(`card-${exerciseId}`);
+                    const viewMode = document.getElementById(`view-mode-${exerciseId}`);
+                    const editMode = document.getElementById(`edit-mode-${exerciseId}`);
+                    const actions = document.getElementById(`actions-${exerciseId}`);
+                    
+                    card.classList.remove('editing');
+                    viewMode.style.display = 'block';
+                    editMode.style.display = 'none';
+                    actions.style.display = 'flex';
+                    
+                    // 원래 데이터 삭제
+                    delete originalData[exerciseId];
+                    
+                    showToast('✅ 저장되었습니다!', 'success');
                 } else {
-                    alert(`저장 실패: ${data.detail || '알 수 없는 오류'}`);
+                    showToast(`❌ 저장 실패: ${data.detail || '알 수 없는 오류'}`, 'error');
                 }
             } catch (error) {
-                alert(`오류 발생: ${error.message}`);
+                showToast(`❌ 오류 발생: ${error.message}`, 'error');
             }
+        }
+        
+        function updateExerciseCard(exerciseId, data) {
+            const viewMode = document.getElementById(`view-mode-${exerciseId}`);
+            const card = document.getElementById(`card-${exerciseId}`);
+            
+            // 제목 업데이트
+            const titleElement = viewMode.querySelector('.exercise-title');
+            if (titleElement) {
+                titleElement.textContent = data.title || '제목 없음';
+            }
+            
+            // 표준 제목 업데이트
+            const standardTitleElement = viewMode.querySelector('.exercise-standard-title');
+            if (standardTitleElement) {
+                standardTitleElement.textContent = data.standard_title || '표준 제목 없음';
+            }
+            
+            // 썸네일 업데이트
+            const thumbnail = card.querySelector('.exercise-thumbnail');
+            if (data.image_url && data.image_file_name) {
+                thumbnail.src = `${data.image_url}${data.image_file_name}`;
+            }
+            
+            // 영상 버튼 업데이트
+            const actions = document.getElementById(`actions-${exerciseId}`);
+            const hasVideo = data.video_url && data.video_url.trim() !== '';
+            const videoUrlEscaped = (data.video_url || '').replace(/'/g, "\\'");
+            const titleEscaped = (data.title || '').replace(/'/g, "\\'");
+            
+            let playBtn = actions.querySelector('.play-video-btn');
+            
+            if (hasVideo) {
+                if (!playBtn) {
+                    // 영상 버튼이 없으면 추가
+                    playBtn = document.createElement('button');
+                    playBtn.className = 'play-video-btn';
+                    playBtn.innerHTML = '▶ 영상 보기';
+                    actions.insertBefore(playBtn, actions.querySelector('.edit-btn'));
+                }
+                // onclick 핸들러 업데이트
+                playBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    openVideoModal(videoUrlEscaped, titleEscaped);
+                };
+            } else {
+                // 영상 버튼 제거
+                if (playBtn) {
+                    playBtn.remove();
+                }
+            }
+            
+            // 편집 모드의 입력 필드도 업데이트 (다음 편집을 위해)
+            const editTitleInput = document.getElementById(`edit-title-${exerciseId}`);
+            const editStandardTitleInput = document.getElementById(`edit-standard-title-${exerciseId}`);
+            const editVideoUrlInput = document.getElementById(`edit-video-url-${exerciseId}`);
+            const editImageUrlInput = document.getElementById(`edit-image-url-${exerciseId}`);
+            const editImageFileNameInput = document.getElementById(`edit-image-filename-${exerciseId}`);
+            
+            if (editTitleInput) editTitleInput.value = data.title || '';
+            if (editStandardTitleInput) editStandardTitleInput.value = data.standard_title || '';
+            if (editVideoUrlInput) editVideoUrlInput.value = data.video_url || '';
+            if (editImageUrlInput) editImageUrlInput.value = data.image_url || '';
+            if (editImageFileNameInput) editImageFileNameInput.value = data.image_file_name || '';
         }
         
         function openVideoModal(videoUrl, title) {
@@ -1283,3 +1442,4 @@ if __name__ == "__main__":
         reload=os.getenv("ENVIRONMENT") == "development",  # 개발 환경에서만 reload
         log_level="info"
     )
+햐
