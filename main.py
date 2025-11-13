@@ -493,11 +493,11 @@ async def update_exercise(
         if not success:
             raise HTTPException(status_code=404, detail="운동을 찾을 수 없거나 업데이트에 실패했습니다")
         
-    return {
-            "success": True,
-            "message": "운동 정보가 성공적으로 업데이트되었습니다",
-            "exercise_id": exercise_id
-        }
+        return {
+                "success": True,
+                "message": "운동 정보가 성공적으로 업데이트되었습니다",
+                "exercise_id": exercise_id
+            }
     except HTTPException:
         raise
     except Exception as e:
