@@ -5,7 +5,9 @@ FastAPI 메인 서버 애플리케이션
 
 import os
 from typing import Dict, Any
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -14,6 +16,7 @@ load_dotenv()
 
 # 로컬 모듈 임포트
 from services.openai_service import openai_service
+from services.mysql_service import MySQLService
 
 
 # FastAPI 앱 초기화
@@ -52,11 +55,11 @@ async def analyze_daily_workout(workout_data: Dict[str, Any]) -> Dict[str, Any]:
         
         if not exercises:
             return {
-                "summary": "운동 기록이 없습니다.",
-                "total_exercises": 0,
-                "total_time": 0,
-                "recommendations": ["운동을 시작해보세요!"]
-            }
+                        "summary": "운동 기록이 없습니다.",
+                        "total_exercises": 0,
+                        "total_time": 0,
+                        "recommendations": ["운동을 시작해보세요!"]
+                    }
         
         # 기본 통계 계산
         total_exercises = len(exercises)
@@ -283,9 +286,9 @@ async def analyze_daily_workout(workout_data: Dict[str, Any]) -> Dict[str, Any]:
         
     except Exception as e:
         return {
-            "error": f"분석 중 오류 발생: {str(e)}",
-            "summary": "운동 데이터 분석에 실패했습니다."
-        }
+                "error": f"분석 중 오류 발생: {str(e)}",
+                "summary": "운동 데이터 분석에 실패했습니다."
+            }
 
 
 @app.post("/api/workout-log/analyze")
@@ -315,7 +318,7 @@ async def analyze_workout_log_with_ai(
         if not ai_analysis.get("success"):
             # OpenAI 실패 시 기본 분석 제공
             basic_analysis = await analyze_daily_workout(workout_log)
-            return {
+        return {
                 "success": False,
                 "message": ai_analysis.get("message", "AI 분석 실패"),
                 "basic_analysis": basic_analysis
@@ -369,8 +372,8 @@ async def recommend_workout_routine(
         if not ai_routine.get("success"):
             raise HTTPException(
                 status_code=500,
-                detail=ai_routine.get("message", "AI 루틴 추천 실패")
-            )
+                    detail=ai_routine.get("message", "AI 루틴 추천 실패")
+                )
         
         # 기본 분석도 함께 제공
         basic_analysis = await analyze_daily_workout(workout_log)
@@ -395,6 +398,693 @@ async def recommend_workout_routine(
             status_code=500,
             detail=f"운동 루틴 추천 중 오류 발생: {str(e)}"
         )
+
+
+# ==================== 운동 데이터 관리 API ====================
+
+class ExerciseUpdateRequest(BaseModel):
+    title: str = None
+    standard_title: str = None
+    video_url: str = None
+    image_url: str = None
+    image_file_name: str = None
+
+
+@app.get("/api/muscles")
+async def get_muscles():
+    """근육 목록 조회"""
+    try:
+        mysql_service = MySQLService()
+        muscles = mysql_service.get_muscles()
+        mysql_service.close()
+        return {
+            "success": True,
+            "muscles": muscles
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"근육 목록 조회 중 오류: {str(e)}")
+
+
+@app.get("/api/exercises")
+async def get_exercises(
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    page_size: int = Query(20, ge=1, le=100, description="페이지 크기"),
+    search: str = Query(None, description="검색어 (제목 또는 표준 제목)")
+):
+    """운동 목록 조회 (페이지네이션)"""
+    try:
+        mysql_service = MySQLService()
+        result = mysql_service.get_exercises(
+            page=page,
+            page_size=page_size,
+            search=search
+        )
+        mysql_service.close()
+        return {
+            "success": True,
+            **result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"운동 목록 조회 중 오류: {str(e)}")
+
+
+@app.get("/api/exercises/{exercise_id}")
+async def get_exercise(exercise_id: int):
+    """특정 운동 조회"""
+    try:
+        mysql_service = MySQLService()
+        exercise = mysql_service.get_exercise_by_id(exercise_id)
+        mysql_service.close()
+        
+        if not exercise:
+            raise HTTPException(status_code=404, detail="운동을 찾을 수 없습니다")
+        
+        return {
+            "success": True,
+            "exercise": exercise
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"운동 조회 중 오류: {str(e)}")
+
+
+@app.put("/api/exercises/{exercise_id}")
+async def update_exercise(
+    exercise_id: int,
+    update_data: ExerciseUpdateRequest
+):
+    """운동 정보 업데이트"""
+    try:
+        mysql_service = MySQLService()
+        
+        # 업데이트할 데이터만 추출
+        update_dict = update_data.dict(exclude_none=True)
+        
+        if not update_dict:
+            raise HTTPException(status_code=400, detail="업데이트할 데이터가 없습니다")
+        
+        success = mysql_service.update_exercise(
+            exercise_id=exercise_id,
+            **update_dict
+        )
+        mysql_service.close()
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="운동을 찾을 수 없거나 업데이트에 실패했습니다")
+        
+        return {
+            "success": True,
+            "message": "운동 정보가 성공적으로 업데이트되었습니다",
+            "exercise_id": exercise_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"운동 업데이트 중 오류: {str(e)}")
+
+
+@app.get("/admin/exercises", response_class=HTMLResponse)
+async def exercise_admin_page():
+    """운동 데이터 관리 페이지"""
+    html_content = """
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>운동 데이터 관리</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .search-bar {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .search-bar input {
+            width: 100%;
+            padding: 12px 20px;
+            font-size: 16px;
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        .search-bar input:focus {
+            border-color: #667eea;
+        }
+        
+        .exercises-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            padding: 30px;
+        }
+        
+        .exercise-card {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 15px;
+            padding: 20px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        
+        .exercise-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            border-color: #667eea;
+        }
+        
+        .exercise-thumbnail {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            background: #f8f9fa;
+        }
+        
+        .exercise-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .exercise-standard-title {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        
+        .exercise-id {
+            font-size: 0.8em;
+            color: #999;
+        }
+        
+        .pagination {
+            padding: 20px 30px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        .pagination button {
+            padding: 10px 20px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        .pagination button:hover:not(:disabled) {
+            background: #667eea;
+            color: white;
+        }
+        
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+        
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        .modal-header h2 {
+            color: #333;
+            font-size: 2em;
+        }
+        
+        .close-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.2em;
+            transition: background 0.3s;
+        }
+        
+        .close-btn:hover {
+            background: #c82333;
+        }
+        
+        .form-group {
+            margin-bottom: 25px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+        
+        .thumbnail-preview {
+            width: 100%;
+            max-height: 300px;
+            object-fit: contain;
+            border-radius: 10px;
+            margin-top: 10px;
+            background: #f8f9fa;
+        }
+        
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 30px;
+        }
+        
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏋️ 운동 데이터 관리</h1>
+            <p>운동 정보를 수정하고 관리하세요</p>
+        </div>
+        
+        <div class="search-bar">
+            <input type="text" id="searchInput" placeholder="운동 제목으로 검색...">
+        </div>
+        
+        <div id="exercisesContainer" class="exercises-grid">
+            <div class="loading">로딩 중...</div>
+        </div>
+        
+        <div class="pagination" id="pagination"></div>
+    </div>
+    
+    <!-- 수정 모달 -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>운동 정보 수정</h2>
+                <button class="close-btn" onclick="closeModal()">✕</button>
+            </div>
+            
+            <div id="messageContainer"></div>
+            
+            <form id="editForm">
+                <input type="hidden" id="exerciseId">
+                
+                <div class="form-group">
+                    <label>제목 (Title)</label>
+                    <input type="text" id="title" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>표준 제목 (Standard Title)</label>
+                    <input type="text" id="standardTitle">
+                </div>
+                
+                <div class="form-group">
+                    <label>영상 링크 (Video URL)</label>
+                    <input type="url" id="videoUrl" placeholder="https://...">
+                </div>
+                
+                <div class="form-group">
+                    <label>이미지 URL (Image URL)</label>
+                    <input type="url" id="imageUrl" placeholder="https://...">
+                </div>
+                
+                <div class="form-group">
+                    <label>이미지 파일명 (Image File Name)</label>
+                    <input type="text" id="imageFileName" placeholder="image.jpg">
+                </div>
+                
+                <div id="thumbnailPreview"></div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">취소</button>
+                    <button type="submit" class="btn btn-primary">저장</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = window.location.origin;
+        let currentPage = 1;
+        let currentSearch = '';
+        
+        // 페이지 로드 시 운동 목록 가져오기
+        document.addEventListener('DOMContentLoaded', () => {
+            loadExercises();
+            
+            // 검색 입력 이벤트
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                currentSearch = e.target.value;
+                currentPage = 1;
+                loadExercises();
+            });
+        });
+        
+        async function loadExercises() {
+            const container = document.getElementById('exercisesContainer');
+            container.innerHTML = '<div class="loading">로딩 중...</div>';
+            
+            try {
+                const params = new URLSearchParams({
+                    page: currentPage,
+                    page_size: 20
+                });
+                
+                if (currentSearch) {
+                    params.append('search', currentSearch);
+                }
+                
+                const response = await fetch(`${API_BASE}/api/exercises?${params}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayExercises(data.exercises);
+                    displayPagination(data.page, data.total_pages);
+                } else {
+                    container.innerHTML = '<div class="error">운동 목록을 불러올 수 없습니다.</div>';
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error">오류 발생: ${error.message}</div>`;
+            }
+        }
+        
+        function displayExercises(exercises) {
+            const container = document.getElementById('exercisesContainer');
+            
+            if (exercises.length === 0) {
+                container.innerHTML = '<div class="loading">운동 데이터가 없습니다.</div>';
+                return;
+            }
+            
+            container.innerHTML = exercises.map(ex => {
+                const thumbnailUrl = ex.image_url && ex.image_file_name 
+                    ? `${ex.image_url}${ex.image_file_name}` 
+                    : 'https://via.placeholder.com/350x200?text=No+Image';
+                
+                return `
+                    <div class="exercise-card" onclick="openEditModal(${ex.exercise_id})">
+                        <img src="${thumbnailUrl}" alt="${ex.title}" class="exercise-thumbnail" 
+                             onerror="this.src='https://via.placeholder.com/350x200?text=No+Image'">
+                        <div class="exercise-title">${ex.title || '제목 없음'}</div>
+                        <div class="exercise-standard-title">${ex.standard_title || '표준 제목 없음'}</div>
+                        <div class="exercise-id">ID: ${ex.exercise_id}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function displayPagination(current, total) {
+            const pagination = document.getElementById('pagination');
+            
+            if (total <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+            
+            let html = `
+                <button onclick="changePage(${current - 1})" ${current === 1 ? 'disabled' : ''}>
+                    이전
+                </button>
+                <span style="padding: 10px 20px; display: inline-block;">
+                    ${current} / ${total}
+                </span>
+                <button onclick="changePage(${current + 1})" ${current === total ? 'disabled' : ''}>
+                    다음
+                </button>
+            `;
+            
+            pagination.innerHTML = html;
+        }
+        
+        function changePage(page) {
+            currentPage = page;
+            loadExercises();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        
+        async function openEditModal(exerciseId) {
+            const modal = document.getElementById('editModal');
+            const form = document.getElementById('editForm');
+            const messageContainer = document.getElementById('messageContainer');
+            messageContainer.innerHTML = '';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/exercises/${exerciseId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const ex = data.exercise;
+                    document.getElementById('exerciseId').value = ex.exercise_id;
+                    document.getElementById('title').value = ex.title || '';
+                    document.getElementById('standardTitle').value = ex.standard_title || '';
+                    document.getElementById('videoUrl').value = ex.video_url || '';
+                    document.getElementById('imageUrl').value = ex.image_url || '';
+                    document.getElementById('imageFileName').value = ex.image_file_name || '';
+                    
+                    updateThumbnailPreview();
+                    modal.classList.add('active');
+                } else {
+                    alert('운동 정보를 불러올 수 없습니다.');
+                }
+            } catch (error) {
+                alert(`오류 발생: ${error.message}`);
+            }
+        }
+        
+        function closeModal() {
+            document.getElementById('editModal').classList.remove('active');
+            document.getElementById('editForm').reset();
+            document.getElementById('thumbnailPreview').innerHTML = '';
+        }
+        
+        function updateThumbnailPreview() {
+            const imageUrl = document.getElementById('imageUrl').value;
+            const imageFileName = document.getElementById('imageFileName').value;
+            const preview = document.getElementById('thumbnailPreview');
+            
+            if (imageUrl && imageFileName) {
+                const fullUrl = `${imageUrl}${imageFileName}`;
+                preview.innerHTML = `
+                    <div class="form-group">
+                        <label>썸네일 미리보기</label>
+                        <img src="${fullUrl}" class="thumbnail-preview" 
+                             onerror="this.style.display='none'">
+                    </div>
+                `;
+            } else {
+                preview.innerHTML = '';
+            }
+        }
+        
+        // 이미지 URL 변경 시 미리보기 업데이트
+        document.getElementById('imageUrl').addEventListener('input', updateThumbnailPreview);
+        document.getElementById('imageFileName').addEventListener('input', updateThumbnailPreview);
+        
+        // 폼 제출
+        document.getElementById('editForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const exerciseId = document.getElementById('exerciseId').value;
+            const updateData = {
+                title: document.getElementById('title').value,
+                standard_title: document.getElementById('standardTitle').value || null,
+                video_url: document.getElementById('videoUrl').value || null,
+                image_url: document.getElementById('imageUrl').value || null,
+                image_file_name: document.getElementById('imageFileName').value || null
+            };
+            
+            // null 값 제거
+            Object.keys(updateData).forEach(key => {
+                if (updateData[key] === null || updateData[key] === '') {
+                    delete updateData[key];
+                }
+            });
+            
+            const messageContainer = document.getElementById('messageContainer');
+            messageContainer.innerHTML = '<div class="loading">저장 중...</div>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/exercises/${exerciseId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updateData)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    messageContainer.innerHTML = '<div class="success">✅ 저장되었습니다!</div>';
+                    setTimeout(() => {
+                        closeModal();
+                        loadExercises();
+                    }, 1500);
+                } else {
+                    messageContainer.innerHTML = `<div class="error">❌ 저장 실패: ${data.detail || '알 수 없는 오류'}</div>`;
+                }
+            } catch (error) {
+                messageContainer.innerHTML = `<div class="error">❌ 오류 발생: ${error.message}</div>`;
+            }
+        });
+        
+        // 모달 외부 클릭 시 닫기
+        document.getElementById('editModal').addEventListener('click', (e) => {
+            if (e.target.id === 'editModal') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
 
 
 # ==================== 서버 실행 ====================
