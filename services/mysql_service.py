@@ -52,28 +52,27 @@ class MySQLService:
             where_clause = ""
             params = []
             if search:
-                where_clause = "WHERE title LIKE %s OR standard_title LIKE %s"
+                where_clause = "WHERE e.title LIKE %s OR e.standard_title LIKE %s"
                 params = [f"%{search}%", f"%{search}%"]
             
             # 전체 개수 조회
-            count_query = f"SELECT COUNT(*) as total FROM ex_muscles {where_clause}"
+            count_query = f"SELECT COUNT(*) as total FROM exercise e {where_clause}"
             self.cursor.execute(count_query, params)
             total = self.cursor.fetchone()['total']
             
-            # 목록 조회 (ex_muscles 뷰에서 직접 조회)
+            # 목록 조회 (exercise 테이블에서 조회)
             query = f"""
                 SELECT 
-                    exercise_id,
-                    title,
-                    standard_title,
-                    video_url,
-                    image_url,
-                    image_file_name,
-                    description,
-                    muscles
-                FROM ex_muscles 
+                    e.exercise_id,
+                    e.title,
+                    e.standard_title,
+                    e.video_url,
+                    e.image_url,
+                    e.image_file_name,
+                    e.description
+                FROM exercise e
                 {where_clause}
-                ORDER BY exercise_id ASC
+                ORDER BY e.exercise_id ASC
                 LIMIT %s OFFSET %s
             """
             params.extend([page_size, offset])

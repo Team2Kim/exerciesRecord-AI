@@ -637,6 +637,7 @@ async def exercise_admin_page():
             padding: 20px 30px;
             display: flex;
             justify-content: center;
+            align-items: center;
             gap: 10px;
             border-top: 1px solid #dee2e6;
         }
@@ -660,6 +661,32 @@ async def exercise_admin_page():
         .pagination button:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+        }
+        
+        .pagination-input {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .pagination-input input {
+            width: 60px;
+            padding: 8px;
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        .pagination-input input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .pagination-input span {
+            color: #666;
+            font-size: 14px;
         }
         
         .modal {
@@ -942,8 +969,6 @@ async def exercise_admin_page():
                     ? `${ex.image_url}${ex.image_file_name}` 
                     : 'https://via.placeholder.com/120x80?text=No+Image';
                 
-                const musclesText = ex.muscles ? ex.muscles : '근육 정보 없음';
-                
                 return `
                     <div class="exercise-card" onclick="openEditModal(${ex.exercise_id})">
                         <img src="${thumbnailUrl}" alt="${ex.title}" class="exercise-thumbnail" 
@@ -951,7 +976,6 @@ async def exercise_admin_page():
                         <div class="exercise-info">
                             <div class="exercise-title">${ex.title || '제목 없음'}</div>
                             <div class="exercise-standard-title">${ex.standard_title || '표준 제목 없음'}</div>
-                            <div class="exercise-muscles">💪 ${musclesText}</div>
                             <div class="exercise-id">ID: ${ex.exercise_id}</div>
                         </div>
                     </div>
@@ -971,9 +995,12 @@ async def exercise_admin_page():
                 <button onclick="changePage(${current - 1})" ${current === 1 ? 'disabled' : ''}>
                     이전
                 </button>
-                <span style="padding: 10px 20px; display: inline-block;">
-                    ${current} / ${total}
-                </span>
+                <div class="pagination-input">
+                    <span>페이지</span>
+                    <input type="number" id="pageInput" min="1" max="${total}" value="${current}" 
+                           onkeypress="if(event.key==='Enter') goToPage()">
+                    <span>/ ${total}</span>
+                </div>
                 <button onclick="changePage(${current + 1})" ${current === total ? 'disabled' : ''}>
                     다음
                 </button>
@@ -983,9 +1010,25 @@ async def exercise_admin_page():
         }
         
         function changePage(page) {
+            if (page < 1) return;
+            const totalPages = document.getElementById('pagination')?.querySelector('.pagination-input span:last-child')?.textContent;
+            if (totalPages) {
+                const total = parseInt(totalPages.replace('/', '').trim());
+                if (page > total) return;
+            }
             currentPage = page;
             loadExercises();
             window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        
+        function goToPage() {
+            const input = document.getElementById('pageInput');
+            if (input) {
+                const page = parseInt(input.value);
+                if (page && page >= 1) {
+                    changePage(page);
+                }
+            }
         }
         
         async function openEditModal(exerciseId) {
