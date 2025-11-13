@@ -569,52 +569,67 @@ async def exercise_admin_page():
             border-color: #667eea;
         }
         
-        .exercises-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
-            padding: 30px;
+        .exercises-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 20px 30px;
         }
         
         .exercise-card {
             background: white;
             border: 2px solid #e9ecef;
-            border-radius: 15px;
-            padding: 20px;
+            border-radius: 12px;
+            padding: 15px 20px;
             transition: all 0.3s;
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 20px;
         }
         
         .exercise-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
             border-color: #667eea;
         }
         
         .exercise-thumbnail {
-            width: 100%;
-            height: 200px;
+            width: 120px;
+            height: 80px;
             object-fit: cover;
-            border-radius: 10px;
-            margin-bottom: 15px;
+            border-radius: 8px;
             background: #f8f9fa;
+            flex-shrink: 0;
+        }
+        
+        .exercise-info {
+            flex: 1;
+            min-width: 0;
         }
         
         .exercise-title {
-            font-size: 1.2em;
+            font-size: 1.1em;
             font-weight: bold;
             color: #333;
-            margin-bottom: 8px;
+            margin-bottom: 5px;
         }
         
         .exercise-standard-title {
-            font-size: 0.9em;
+            font-size: 0.85em;
             color: #666;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
+        }
+        
+        .exercise-muscles {
+            font-size: 0.8em;
+            color: #667eea;
+            margin-bottom: 5px;
+            font-weight: 500;
         }
         
         .exercise-id {
-            font-size: 0.8em;
+            font-size: 0.75em;
             color: #999;
         }
         
@@ -814,7 +829,7 @@ async def exercise_admin_page():
             <input type="text" id="searchInput" placeholder="운동 제목으로 검색...">
         </div>
         
-        <div id="exercisesContainer" class="exercises-grid">
+        <div id="exercisesContainer" class="exercises-list">
             <div class="loading">로딩 중...</div>
         </div>
         
@@ -925,15 +940,20 @@ async def exercise_admin_page():
             container.innerHTML = exercises.map(ex => {
                 const thumbnailUrl = ex.image_url && ex.image_file_name 
                     ? `${ex.image_url}${ex.image_file_name}` 
-                    : 'https://via.placeholder.com/350x200?text=No+Image';
+                    : 'https://via.placeholder.com/120x80?text=No+Image';
+                
+                const musclesText = ex.muscles ? ex.muscles : '근육 정보 없음';
                 
                 return `
                     <div class="exercise-card" onclick="openEditModal(${ex.exercise_id})">
                         <img src="${thumbnailUrl}" alt="${ex.title}" class="exercise-thumbnail" 
-                             onerror="this.src='https://via.placeholder.com/350x200?text=No+Image'">
-                        <div class="exercise-title">${ex.title || '제목 없음'}</div>
-                        <div class="exercise-standard-title">${ex.standard_title || '표준 제목 없음'}</div>
-                        <div class="exercise-id">ID: ${ex.exercise_id}</div>
+                             onerror="this.src='https://via.placeholder.com/120x80?text=No+Image'">
+                        <div class="exercise-info">
+                            <div class="exercise-title">${ex.title || '제목 없음'}</div>
+                            <div class="exercise-standard-title">${ex.standard_title || '표준 제목 없음'}</div>
+                            <div class="exercise-muscles">💪 ${musclesText}</div>
+                            <div class="exercise-id">ID: ${ex.exercise_id}</div>
+                        </div>
                     </div>
                 `;
             }).join('');

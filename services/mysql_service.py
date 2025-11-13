@@ -56,11 +56,11 @@ class MySQLService:
                 params = [f"%{search}%", f"%{search}%"]
             
             # 전체 개수 조회
-            count_query = f"SELECT COUNT(*) as total FROM exercise {where_clause}"
+            count_query = f"SELECT COUNT(*) as total FROM ex_muscles {where_clause}"
             self.cursor.execute(count_query, params)
             total = self.cursor.fetchone()['total']
             
-            # 목록 조회
+            # 목록 조회 (ex_muscles 뷰에서 직접 조회)
             query = f"""
                 SELECT 
                     exercise_id,
@@ -69,10 +69,11 @@ class MySQLService:
                     video_url,
                     image_url,
                     image_file_name,
-                    description
-                FROM exercise 
+                    description,
+                    muscles
+                FROM ex_muscles 
                 {where_clause}
-                ORDER BY exercise_id DESC
+                ORDER BY exercise_id ASC
                 LIMIT %s OFFSET %s
             """
             params.extend([page_size, offset])
