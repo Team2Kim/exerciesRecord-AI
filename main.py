@@ -1072,8 +1072,8 @@ async def exercise_admin_page():
                                        value="${(ex.image_file_name || '').replace(/"/g, '&quot;')}" placeholder="image.jpg">
                                 
                                 <div class="edit-actions">
-                                    <button class="save-btn" onclick="saveExercise(${ex.exercise_id})">💾 저장</button>
-                                    <button class="cancel-btn" onclick="cancelEdit(${ex.exercise_id})">❌ 취소</button>
+                                    <button type="button" class="save-btn" onclick="event.stopPropagation(); saveExercise(${ex.exercise_id})">💾 저장</button>
+                                    <button type="button" class="cancel-btn" onclick="event.stopPropagation(); cancelEdit(${ex.exercise_id})">❌ 취소</button>
                                 </div>
                             </div>
                         </div>
@@ -1171,6 +1171,12 @@ async def exercise_admin_page():
         }
         
         function cancelEdit(exerciseId) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            
+            // 즉시 처리 (네트워크 요청 없음)
             const card = document.getElementById(`card-${exerciseId}`);
             const viewMode = document.getElementById(`view-mode-${exerciseId}`);
             const editMode = document.getElementById(`edit-mode-${exerciseId}`);
@@ -1191,6 +1197,8 @@ async def exercise_admin_page():
             viewMode.style.display = 'block';
             editMode.style.display = 'none';
             actions.style.display = 'flex';
+            
+            showToast('편집이 취소되었습니다.', 'error');
         }
         
         function showToast(message, type = 'success') {
@@ -1208,6 +1216,17 @@ async def exercise_admin_page():
         }
         
         async function saveExercise(exerciseId) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            
+            // 버튼 비활성화 (중복 클릭 방지)
+            const saveBtn = document.querySelector(`#edit-mode-${exerciseId} .save-btn`);
+            const cancelBtn = document.querySelector(`#edit-mode-${exerciseId} .cancel-btn`);
+            if (saveBtn) saveBtn.disabled = true;
+            if (cancelBtn) cancelBtn.disabled = true;
+            
             const title = document.getElementById(`edit-title-${exerciseId}`).value;
             const standardTitle = document.getElementById(`edit-standard-title-${exerciseId}`).value;
             const videoUrl = document.getElementById(`edit-video-url-${exerciseId}`).value;
@@ -1230,6 +1249,8 @@ async def exercise_admin_page():
             });
             
             if (Object.keys(updateData).length === 0) {
+                if (saveBtn) saveBtn.disabled = false;
+                if (cancelBtn) cancelBtn.disabled = false;
                 showToast('수정할 내용이 없습니다.', 'error');
                 return;
             }
@@ -1243,16 +1264,17 @@ async def exercise_admin_page():
                     body: JSON.stringify(updateData)
                 });
                 
-                const data = await response.json();
+                const result = await response.json();
                 
-                if (data.success) {
-                    // 화면만 업데이트 (리로드 없이)
+                if (result.success && result.data) {
+                    // 서버에서 반환한 최신 데이터로 화면만 업데이트 (리로드 없이)
+                    const exerciseData = result.data;
                     updateExerciseCard(exerciseId, {
-                        title: title,
-                        standard_title: standardTitle,
-                        video_url: videoUrl,
-                        image_url: imageUrl,
-                        image_file_name: imageFileName
+                        title: exerciseData.title || title,
+                        standard_title: exerciseData.standard_title || standardTitle,
+                        video_url: exerciseData.video_url || videoUrl,
+                        image_url: exerciseData.image_url || imageUrl,
+                        image_file_name: exerciseData.image_file_name || imageFileName
                     });
                     
                     // 편집 모드 종료
@@ -1271,9 +1293,13 @@ async def exercise_admin_page():
                     
                     showToast('✅ 저장되었습니다!', 'success');
                 } else {
-                    showToast(`❌ 저장 실패: ${data.detail || '알 수 없는 오류'}`, 'error');
+                    if (saveBtn) saveBtn.disabled = false;
+                    if (cancelBtn) cancelBtn.disabled = false;
+                    showToast(`❌ 저장 실패: ${result.detail || '알 수 없는 오류'}`, 'error');
                 }
             } catch (error) {
+                if (saveBtn) saveBtn.disabled = false;
+                if (cancelBtn) cancelBtn.disabled = false;
                 showToast(`❌ 오류 발생: ${error.message}`, 'error');
             }
         }
@@ -1296,8 +1322,13 @@ async def exercise_admin_page():
             
             // 썸네일 업데이트
             const thumbnail = card.querySelector('.exercise-thumbnail');
-            if (data.image_url && data.image_file_name) {
-                thumbnail.src = `${data.image_url}${data.image_file_name}`;
+            if (thumbnail) {
+                if (data.image_url && data.image_file_name) {
+                    thumbnail.src = `${data.image_url}${data.image_file_name}`;
+                    thumbnail.style.display = 'block';
+                } else {
+                    thumbnail.style.display = 'none';
+                }
             }
             
             // 영상 버튼 업데이트
