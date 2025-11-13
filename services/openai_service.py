@@ -6,7 +6,7 @@ OpenAI API 서비스
 from openai import OpenAI
 import os
 import json
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from models.schemas import ComprehensiveAnalysis
 from dotenv import load_dotenv
 
@@ -423,6 +423,140 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 "success": False,
                 "message": f"루틴 추천 중 오류 발생: {str(e)}"
             }
+
+    def analyze_weekly_pattern_and_recommend(
+        self,
+        weekly_logs: List[Dict[str, Any]],
+        model: str = "gpt-4o-mini"
+    ) -> Dict[str, Any]:
+        """
+        7일치 운동 데이터를 기반으로 패턴을 분석하고 맞춤 루틴을 추천합니다.
+
+        Args:
+            weekly_logs: 날짜 역순 또는 순차 정렬된 7일치 운동 기록 리스트
+            model: 사용할 OpenAI 모델 (기본값: "gpt-4o-mini")
+
+        Returns:
+            Dict[str, Any]: 패턴 분석 및 루틴 추천 결과
+        """
+
+        if not self.client:
+            return {
+                "success": False,
+                "message": "OpenAI API 키가 설정되지 않았습니다."
+            }
+
+        try:
+            prompt, metrics = self._create_weekly_pattern_prompt(weekly_logs)
+
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": f"""당신은 전문 운동 코치이자 데이터 분석가입니다. 반드시 다음 JSON 형식으로만 응답하세요:
+
+{{
+    "summary_metrics": {{
+        "weekly_workout_count": 0,
+        "rest_days": 0,
+        "total_minutes": 0,
+        "intensity_counts": {{"상": 0, "중": 0, "하": 0}},
+        "body_part_counts": {{"어깨": 0, "가슴": 0}},
+        "top_muscles": [{{"name": "근육명", "count": 0}}]
+    }},
+    "pattern_analysis": {{
+        "consistency": "훈련 빈도와 규칙성 분석",
+        "intensity_trend": "강도 변화와 피로 누적에 대한 평가",
+        "muscle_balance": {{
+            "overworked": ["근육명1", "근육명2"],
+            "underworked": ["근육명3", "근육명4"],
+            "comments": "근육 사용 균형에 대한 종합 의견"
+        }},
+        "habit_observation": "생활 패턴 및 회복 습관 관련 인사이트"
+    }},
+    "recommended_routine": {{
+        "weekly_overview": [
+            "요일별 주요 타겟과 목표",
+            "필요 시 휴식/회복 권장"
+        ],
+        "daily_details": [
+            {{
+                "day": 1,
+                "focus": "주요 부위 및 목표",
+                "exercises": [
+                    {{
+                        "name": "운동명",
+                        "sets": "세트 수",
+                        "reps": "반복 수",
+                        "rest": "휴식 시간",
+                        "notes": "폼 또는 강도 조절 팁"
+                    }}
+                ],
+                "estimated_duration": "예상 소요 시간"
+            }}
+        ],
+        "progression_strategy": "점진적 과부하 또는 변화를 위한 전략"
+    }},
+    "recovery_guidance": "영양, 수면, 스트레칭 등 회복 팁",
+    "next_target_muscles": ["근육명1", "근육명2", "근육명3"],
+    "encouragement": "격려 메시지"
+}}
+
+친근하고 격려하는 톤을 유지하면서 반드시 위 JSON 구조를 따르세요.
+
+⚠️ 중요: next_target_muscles, muscle_balance.overworked, muscle_balance.underworked 필드는 반드시 아래 근육 라벨 목록에 정확히 포함된 이름만 사용해야 합니다.
+다른 이름(예: "어깨근육", "팔근육", "복근" 등)은 절대 사용하지 마세요.
+반드시 아래 목록에서 정확한 근육명을 선택하세요."""
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.7,
+                max_tokens=2200,
+                response_format={"type": "json_object"}
+            )
+
+            ai_response = response.choices[0].message.content
+
+            try:
+                parsed_response = json.loads(ai_response)
+
+                for key in [
+                    ("next_target_muscles", parsed_response.get("next_target_muscles")),
+                    ("overworked", parsed_response.get("pattern_analysis", {})
+                                 .get("muscle_balance", {})
+                                 .get("overworked")),
+                    ("underworked", parsed_response.get("pattern_analysis", {})
+                                 .get("muscle_balance", {})
+                                 .get("underworked"))
+                ]:
+                    field_name, muscles = key
+                    if isinstance(muscles, list):
+                        validated = validate_and_map_muscles(muscles)
+
+                        if field_name == "next_target_muscles":
+                            parsed_response["next_target_muscles"] = validated
+                        else:
+                            muscle_balance = parsed_response.setdefault("pattern_analysis", {}).setdefault("muscle_balance", {})
+                            muscle_balance[field_name] = validated
+            except json.JSONDecodeError:
+                parsed_response = {"raw_response": ai_response}
+
+            return {
+                "success": True,
+                "result": parsed_response,
+                "metrics_summary": metrics,
+                "model": model
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"주간 패턴 분석 중 오류 발생: {str(e)}"
+            }
     
     def _create_log_analysis_prompt(self, workout_log: Dict[str, Any]) -> str:
         """운동 일지 데이터를 프롬프트로 변환"""
@@ -566,6 +700,167 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 {', '.join(MUSCLE_LABELS)}
 """
         return prompt
+
+    def _calculate_weekly_metrics(self, weekly_logs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        intensity_counts: Dict[str, int] = {"상": 0, "중": 0, "하": 0}
+        body_part_counts: Dict[str, int] = {}
+        muscle_counts: Dict[str, int] = {}
+        total_minutes = 0
+        active_days = 0
+
+        for log in weekly_logs:
+            raw_exercises = log.get("exercises")
+
+            if isinstance(raw_exercises, list):
+                exercises = [ex for ex in raw_exercises if isinstance(ex, dict)]
+            elif isinstance(raw_exercises, dict):
+                exercises = [raw_exercises]
+            else:
+                exercises = []
+
+            if exercises:
+                active_days += 1
+
+            for ex in exercises:
+                intensity = ex.get("intensity", "중")
+                if intensity not in intensity_counts:
+                    intensity_counts.setdefault("기타", 0)
+                    intensity_counts["기타"] += 1
+                else:
+                    intensity_counts[intensity] += 1
+
+                total_minutes += ex.get("exerciseTime", 0)
+
+                exercise_info = ex.get("exercise", {})
+                body_part = exercise_info.get("bodyPart") or self._infer_body_part(exercise_info)
+                body_part_counts[body_part] = body_part_counts.get(body_part, 0) + 1
+
+                for muscle in exercise_info.get("muscles", []):
+                    muscle_counts[muscle] = muscle_counts.get(muscle, 0) + 1
+
+        top_muscles = [
+            {"name": name, "count": count}
+            for name, count in sorted(muscle_counts.items(), key=lambda item: item[1], reverse=True)
+        ]
+
+        # 주간 분석이므로 총 일수는 항상 7일로 고정
+        rest_days = max(0, 7 - active_days)
+
+        return {
+            "weekly_workout_count": active_days,
+            "rest_days": rest_days,
+            "total_minutes": total_minutes,
+            "intensity_counts": intensity_counts,
+            "body_part_counts": body_part_counts,
+            "top_muscles": top_muscles
+        }
+
+    def _infer_body_part(self, exercise_info: Dict[str, Any]) -> str:
+        title = exercise_info.get("title", "").lower()
+        description = exercise_info.get("description", "").lower()
+        training_name = exercise_info.get("trainingName", "").lower()
+
+        lower_body_keywords = [
+            "다리", "하체", "스쿼트", "런지", "데드", "레그", "대퇴", "허벅지", "종아리", "힙", "볼기", "둔근"
+        ]
+        upper_body_keywords = [
+            "가슴", "어깨", "팔", "등", "코어", "복부", "벤치", "프레스", "풀업", "랫", "로우"
+        ]
+
+        text = " ".join(filter(None, [title, description, training_name]))
+
+        if any(keyword in text for keyword in lower_body_keywords):
+            return "하체"
+        if any(keyword in text for keyword in upper_body_keywords):
+            return "상체"
+
+        return "기타"
+
+    def _create_weekly_pattern_prompt(self, weekly_logs: List[Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+        """7일치 운동 기록을 프롬프트로 변환"""
+
+        if not weekly_logs:
+            return (
+                "최근 7일간의 운동 기록이 제공되지 않았습니다. 가능한 경우 최근 기록을 기반으로 통찰과 루틴을 제안해주세요.",
+                {
+                    "weekly_workout_count": 0,
+                    "rest_days": 7,
+                    "total_minutes": 0,
+                    "intensity_counts": {"상": 0, "중": 0, "하": 0},
+                    "body_part_counts": {},
+                    "top_muscles": []
+                }
+            )
+
+        metrics = self._calculate_weekly_metrics(weekly_logs)
+
+        intensity_summary_items = [
+            f"{level} {count}회" for level, count in metrics["intensity_counts"].items()
+        ]
+        intensity_summary = ", ".join(intensity_summary_items) if intensity_summary_items else "데이터 없음"
+
+        sorted_body_parts = sorted(
+            metrics["body_part_counts"].items(),
+            key=lambda item: item[1],
+            reverse=True
+        )
+        body_part_summary = ", ".join(
+            f"{bp} {cnt}회" for bp, cnt in sorted_body_parts[:6]
+        ) if sorted_body_parts else "데이터 없음"
+
+        top_muscle_summary = ", ".join(
+            f"{entry['name']} {entry['count']}회" for entry in metrics.get("top_muscles", [])[:6]
+        ) if metrics.get("top_muscles") else "데이터 없음"
+
+        prompt = """
+사용자의 최근 7일 운동 기록을 분석하고, 패턴을 파악해 적절한 루틴을 제안해주세요.
+
+[7일 운동 기록]
+"""
+
+        for idx, log in enumerate(weekly_logs, 1):
+            date = log.get("date", "날짜 정보 없음")
+            memo = log.get("memo", "")
+            exercises = log.get("exercises", [])
+
+            prompt += f"""
+날짜 {idx}: {date}
+메모: {memo if memo else '메모 없음'}
+운동 목록:
+"""
+
+            if not exercises:
+                prompt += "- 기록된 운동 없음\n"
+            else:
+                for ex_idx, ex_data in enumerate(exercises, 1):
+                    exercise = ex_data.get("exercise", {})
+                    prompt += f"- 운동 {ex_idx}: {exercise.get('title', '운동명 없음')} | 사용 근육: {', '.join(exercise.get('muscles', [])) or '정보 없음'} | 강도: {ex_data.get('intensity', '정보 없음')} | 시간: {ex_data.get('exerciseTime', 0)}분 | 도구: {exercise.get('exerciseTool', '정보 없음')}\n"
+
+        prompt += f"""
+
+[주간 요약 지표]
+- 주간 운동 횟수: {metrics['weekly_workout_count']}회
+- 총 운동 시간: {metrics['total_minutes']}분
+- 강도 분포: {intensity_summary}
+- 주요 운동 부위: {body_part_summary}
+- 상위 근육 사용: {top_muscle_summary}
+- 휴식일 수: {metrics['rest_days']}일
+
+[분석 및 추천 지침]
+1. 주간 운동 빈도, 강도, 회복 상태를 종합 분석
+2. 근육 사용량의 불균형, 과사용/부족 부위를 명확히 제시
+3. 다음 주를 위한 4~6회 분할 루틴을 구성하고 휴식일 또는 액티브 리커버리 제안 포함
+4. 점진적 과부하 전략과 컨디션 조절 팁 포함
+5. 회복을 돕는 생활 습관(수면, 영양, 스트레칭) 권장 사항 제시
+
+[근육 라벨 목록]
+아래 목록에 포함된 근육명만 사용하여 muscle_balance.overworked, muscle_balance.underworked, next_target_muscles 항목을 구성하세요.
+{', '.join(MUSCLE_LABELS)}
+
+친근하고 격려하는 톤으로 작성하되, 실행 가능한 구체적인 정보를 제공해주세요.
+"""
+
+        return prompt, metrics
 
 
 # 전역 서비스 인스턴스
