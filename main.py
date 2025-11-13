@@ -588,10 +588,15 @@ async def exercise_admin_page():
             position: relative;
         }
         
-        .exercise-card:hover {
+        .exercise-card:hover:not(.editing) {
             transform: translateX(5px);
             box-shadow: 0 5px 15px rgba(0,0,0,0.1);
             border-color: #667eea;
+        }
+        
+        .exercise-card.editing {
+            border-color: #667eea;
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.3);
         }
         
         .exercise-actions {
@@ -649,6 +654,10 @@ async def exercise_admin_page():
         .exercise-info {
             flex: 1;
             min-width: 0;
+        }
+        
+        .edit-mode {
+            width: 100%;
         }
         
         .exercise-title {
@@ -936,54 +945,6 @@ async def exercise_admin_page():
         </div>
     </div>
     
-    <!-- 수정 모달 -->
-    <div id="editModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>운동 정보 수정</h2>
-                <button class="close-btn" onclick="closeModal()">✕</button>
-            </div>
-            
-            <div id="messageContainer"></div>
-            
-            <form id="editForm">
-                <input type="hidden" id="exerciseId">
-                
-                <div class="form-group">
-                    <label>제목 (Title)</label>
-                    <input type="text" id="title" required>
-                </div>
-                
-                <div class="form-group">
-                    <label>표준 제목 (Standard Title)</label>
-                    <input type="text" id="standardTitle">
-                </div>
-                
-                <div class="form-group">
-                    <label>영상 링크 (Video URL)</label>
-                    <input type="url" id="videoUrl" placeholder="https://...">
-                </div>
-                
-                <div class="form-group">
-                    <label>이미지 URL (Image URL)</label>
-                    <input type="url" id="imageUrl" placeholder="https://...">
-                </div>
-                
-                <div class="form-group">
-                    <label>이미지 파일명 (Image File Name)</label>
-                    <input type="text" id="imageFileName" placeholder="image.jpg">
-                </div>
-                
-                <div id="thumbnailPreview"></div>
-                
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">취소</button>
-                    <button type="submit" class="btn btn-primary">저장</button>
-                </div>
-            </form>
-        </div>
-    </div>
-    
     <script>
         const API_BASE = window.location.origin;
         let currentPage = 1;
@@ -1043,23 +1004,53 @@ async def exercise_admin_page():
                     : 'https://via.placeholder.com/120x80?text=No+Image';
                 
                 const hasVideo = ex.video_url && ex.video_url.trim() !== '';
+                const videoUrlEscaped = (ex.video_url || '').replace(/'/g, "\\'");
+                const titleEscaped = (ex.title || '').replace(/'/g, "\\'");
                 
                 return `
-                    <div class="exercise-card">
+                    <div class="exercise-card" id="card-${ex.exercise_id}" data-exercise-id="${ex.exercise_id}">
                         <img src="${thumbnailUrl}" alt="${ex.title}" class="exercise-thumbnail" 
                              onerror="this.src='https://via.placeholder.com/120x80?text=No+Image'">
                         <div class="exercise-info" style="flex: 1;">
-                            <div class="exercise-title">${ex.title || '제목 없음'}</div>
-                            <div class="exercise-standard-title">${ex.standard_title || '표준 제목 없음'}</div>
-                            <div class="exercise-id">ID: ${ex.exercise_id}</div>
+                            <div id="view-mode-${ex.exercise_id}">
+                                <div class="exercise-title">${ex.title || '제목 없음'}</div>
+                                <div class="exercise-standard-title">${ex.standard_title || '표준 제목 없음'}</div>
+                                <div class="exercise-id">ID: ${ex.exercise_id}</div>
+                            </div>
+                            <div id="edit-mode-${ex.exercise_id}" class="edit-mode" style="display: none;">
+                                <label class="inline-edit-label">제목 (Title)</label>
+                                <input type="text" class="inline-edit-input" id="edit-title-${ex.exercise_id}" 
+                                       value="${(ex.title || '').replace(/"/g, '&quot;')}" placeholder="제목">
+                                
+                                <label class="inline-edit-label">표준 제목 (Standard Title)</label>
+                                <input type="text" class="inline-edit-input" id="edit-standard-title-${ex.exercise_id}" 
+                                       value="${(ex.standard_title || '').replace(/"/g, '&quot;')}" placeholder="표준 제목">
+                                
+                                <label class="inline-edit-label">영상 링크 (Video URL)</label>
+                                <input type="url" class="inline-edit-input" id="edit-video-url-${ex.exercise_id}" 
+                                       value="${(ex.video_url || '').replace(/"/g, '&quot;')}" placeholder="https://...">
+                                
+                                <label class="inline-edit-label">이미지 URL (Image URL)</label>
+                                <input type="url" class="inline-edit-input" id="edit-image-url-${ex.exercise_id}" 
+                                       value="${(ex.image_url || '').replace(/"/g, '&quot;')}" placeholder="https://...">
+                                
+                                <label class="inline-edit-label">이미지 파일명 (Image File Name)</label>
+                                <input type="text" class="inline-edit-input" id="edit-image-filename-${ex.exercise_id}" 
+                                       value="${(ex.image_file_name || '').replace(/"/g, '&quot;')}" placeholder="image.jpg">
+                                
+                                <div class="edit-actions">
+                                    <button class="save-btn" onclick="saveExercise(${ex.exercise_id})">💾 저장</button>
+                                    <button class="cancel-btn" onclick="cancelEdit(${ex.exercise_id})">❌ 취소</button>
+                                </div>
+                            </div>
                         </div>
-                        <div class="exercise-actions">
+                        <div class="exercise-actions" id="actions-${ex.exercise_id}">
                             ${hasVideo ? `
-                                <button class="play-video-btn" onclick="event.stopPropagation(); openVideoModal('${ex.video_url}', '${ex.title || '영상'}')">
+                                <button class="play-video-btn" onclick="event.stopPropagation(); openVideoModal('${videoUrlEscaped}', '${titleEscaped}')">
                                     ▶ 영상 보기
                                 </button>
                             ` : ''}
-                            <button class="edit-btn" onclick="openEditModal(${ex.exercise_id})">
+                            <button class="edit-btn" onclick="event.stopPropagation(); startEdit(${ex.exercise_id})">
                                 ✏️ 수정
                             </button>
                         </div>
@@ -1116,39 +1107,80 @@ async def exercise_admin_page():
             }
         }
         
-        async function openEditModal(exerciseId) {
-            const modal = document.getElementById('editModal');
-            const form = document.getElementById('editForm');
-            const messageContainer = document.getElementById('messageContainer');
-            messageContainer.innerHTML = '';
+        function startEdit(exerciseId) {
+            const card = document.getElementById(`card-${exerciseId}`);
+            const viewMode = document.getElementById(`view-mode-${exerciseId}`);
+            const editMode = document.getElementById(`edit-mode-${exerciseId}`);
+            const actions = document.getElementById(`actions-${exerciseId}`);
+            
+            card.classList.add('editing');
+            viewMode.style.display = 'none';
+            editMode.style.display = 'block';
+            actions.style.display = 'none';
+        }
+        
+        function cancelEdit(exerciseId) {
+            const card = document.getElementById(`card-${exerciseId}`);
+            const viewMode = document.getElementById(`view-mode-${exerciseId}`);
+            const editMode = document.getElementById(`edit-mode-${exerciseId}`);
+            const actions = document.getElementById(`actions-${exerciseId}`);
+            
+            // 원래 데이터로 복원
+            loadExercises();
+            
+            card.classList.remove('editing');
+            viewMode.style.display = 'block';
+            editMode.style.display = 'none';
+            actions.style.display = 'flex';
+        }
+        
+        async function saveExercise(exerciseId) {
+            const title = document.getElementById(`edit-title-${exerciseId}`).value;
+            const standardTitle = document.getElementById(`edit-standard-title-${exerciseId}`).value;
+            const videoUrl = document.getElementById(`edit-video-url-${exerciseId}`).value;
+            const imageUrl = document.getElementById(`edit-image-url-${exerciseId}`).value;
+            const imageFileName = document.getElementById(`edit-image-filename-${exerciseId}`).value;
+            
+            const updateData = {
+                title: title || null,
+                standard_title: standardTitle || null,
+                video_url: videoUrl || null,
+                image_url: imageUrl || null,
+                image_file_name: imageFileName || null
+            };
+            
+            // null 값 제거
+            Object.keys(updateData).forEach(key => {
+                if (updateData[key] === null || updateData[key] === '') {
+                    delete updateData[key];
+                }
+            });
+            
+            if (Object.keys(updateData).length === 0) {
+                alert('수정할 내용이 없습니다.');
+                return;
+            }
             
             try {
-                const response = await fetch(`${API_BASE}/api/exercises/${exerciseId}`);
+                const response = await fetch(`${API_BASE}/api/exercises/${exerciseId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updateData)
+                });
+                
                 const data = await response.json();
                 
                 if (data.success) {
-                    const ex = data.exercise;
-                    document.getElementById('exerciseId').value = ex.exercise_id;
-                    document.getElementById('title').value = ex.title || '';
-                    document.getElementById('standardTitle').value = ex.standard_title || '';
-                    document.getElementById('videoUrl').value = ex.video_url || '';
-                    document.getElementById('imageUrl').value = ex.image_url || '';
-                    document.getElementById('imageFileName').value = ex.image_file_name || '';
-                    
-                    updateThumbnailPreview();
-                    modal.classList.add('active');
+                    // 성공 시 목록 새로고침
+                    await loadExercises();
                 } else {
-                    alert('운동 정보를 불러올 수 없습니다.');
+                    alert(`저장 실패: ${data.detail || '알 수 없는 오류'}`);
                 }
             } catch (error) {
                 alert(`오류 발생: ${error.message}`);
             }
-        }
-        
-        function closeModal() {
-            document.getElementById('editModal').classList.remove('active');
-            document.getElementById('editForm').reset();
-            document.getElementById('thumbnailPreview').innerHTML = '';
         }
         
         function openVideoModal(videoUrl, title) {
@@ -1171,83 +1203,6 @@ async def exercise_admin_page():
             modal.classList.remove('active');
         }
         
-        function updateThumbnailPreview() {
-            const imageUrl = document.getElementById('imageUrl').value;
-            const imageFileName = document.getElementById('imageFileName').value;
-            const preview = document.getElementById('thumbnailPreview');
-            
-            if (imageUrl && imageFileName) {
-                const fullUrl = `${imageUrl}${imageFileName}`;
-                preview.innerHTML = `
-                    <div class="form-group">
-                        <label>썸네일 미리보기</label>
-                        <img src="${fullUrl}" class="thumbnail-preview" 
-                             onerror="this.style.display='none'">
-                    </div>
-                `;
-            } else {
-                preview.innerHTML = '';
-            }
-        }
-        
-        // 이미지 URL 변경 시 미리보기 업데이트
-        document.getElementById('imageUrl').addEventListener('input', updateThumbnailPreview);
-        document.getElementById('imageFileName').addEventListener('input', updateThumbnailPreview);
-        
-        // 폼 제출
-        document.getElementById('editForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const exerciseId = document.getElementById('exerciseId').value;
-            const updateData = {
-                title: document.getElementById('title').value,
-                standard_title: document.getElementById('standardTitle').value || null,
-                video_url: document.getElementById('videoUrl').value || null,
-                image_url: document.getElementById('imageUrl').value || null,
-                image_file_name: document.getElementById('imageFileName').value || null
-            };
-            
-            // null 값 제거
-            Object.keys(updateData).forEach(key => {
-                if (updateData[key] === null || updateData[key] === '') {
-                    delete updateData[key];
-                }
-            });
-            
-            const messageContainer = document.getElementById('messageContainer');
-            messageContainer.innerHTML = '<div class="loading">저장 중...</div>';
-            
-            try {
-                const response = await fetch(`${API_BASE}/api/exercises/${exerciseId}`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(updateData)
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    messageContainer.innerHTML = '<div class="success">✅ 저장되었습니다!</div>';
-                    setTimeout(() => {
-                        closeModal();
-                        loadExercises();
-                    }, 1500);
-                } else {
-                    messageContainer.innerHTML = `<div class="error">❌ 저장 실패: ${data.detail || '알 수 없는 오류'}</div>`;
-                }
-            } catch (error) {
-                messageContainer.innerHTML = `<div class="error">❌ 오류 발생: ${error.message}</div>`;
-            }
-        });
-        
-        // 모달 외부 클릭 시 닫기
-        document.getElementById('editModal').addEventListener('click', (e) => {
-            if (e.target.id === 'editModal') {
-                closeModal();
-            }
-        });
         
         document.getElementById('videoModal').addEventListener('click', (e) => {
             if (e.target.id === 'videoModal') {
