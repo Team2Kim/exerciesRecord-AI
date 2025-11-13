@@ -456,13 +456,13 @@ async def get_exercise(exercise_id: int):
         exercise = mysql_service.get_exercise_by_id(exercise_id)
         mysql_service.close()
         
-    if not exercise:
-        raise HTTPException(status_code=404, detail="운동을 찾을 수 없습니다")
-    
-        return {
-            "success": True,
-            "exercise": exercise
-        }
+        if not exercise:
+            raise HTTPException(status_code=404, detail="운동을 찾을 수 없습니다")
+        
+            return {
+                "success": True,
+                "exercise": exercise
+            }
     except HTTPException:
         raise
     except Exception as e:
