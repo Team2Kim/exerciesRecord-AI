@@ -456,9 +456,9 @@ async def get_exercise(exercise_id: int):
         exercise = mysql_service.get_exercise_by_id(exercise_id)
         mysql_service.close()
         
-        if not exercise:
-            raise HTTPException(status_code=404, detail="운동을 찾을 수 없습니다")
-        
+    if not exercise:
+        raise HTTPException(status_code=404, detail="운동을 찾을 수 없습니다")
+    
         return {
             "success": True,
             "exercise": exercise
@@ -493,7 +493,7 @@ async def update_exercise(
         if not success:
             raise HTTPException(status_code=404, detail="운동을 찾을 수 없거나 업데이트에 실패했습니다")
         
-        return {
+    return {
             "success": True,
             "message": "운동 정보가 성공적으로 업데이트되었습니다",
             "exercise_id": exercise_id
@@ -582,16 +582,59 @@ async def exercise_admin_page():
             border-radius: 12px;
             padding: 15px 20px;
             transition: all 0.3s;
-            cursor: pointer;
             display: flex;
             align-items: center;
             gap: 20px;
+            position: relative;
         }
         
         .exercise-card:hover {
             transform: translateX(5px);
             box-shadow: 0 5px 15px rgba(0,0,0,0.1);
             border-color: #667eea;
+        }
+        
+        .exercise-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .play-video-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .play-video-btn:hover {
+            background: #218838;
+            transform: scale(1.05);
+        }
+        
+        .edit-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        .edit-btn:hover {
+            background: #5568d3;
+            transform: scale(1.05);
         }
         
         .exercise-thumbnail {
@@ -717,6 +760,22 @@ async def exercise_admin_page():
             max-height: 90vh;
             overflow-y: auto;
             position: relative;
+        }
+        
+        .video-modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 1000px;
+            width: 100%;
+            position: relative;
+        }
+        
+        .video-player {
+            width: 100%;
+            max-height: 70vh;
+            border-radius: 10px;
+            background: #000;
         }
         
         .modal-header {
@@ -863,6 +922,20 @@ async def exercise_admin_page():
         <div class="pagination" id="pagination"></div>
     </div>
     
+    <!-- 영상 모달 -->
+    <div id="videoModal" class="modal">
+        <div class="video-modal-content">
+            <div class="modal-header">
+                <h2 id="videoTitle">영상 재생</h2>
+                <button class="close-btn" onclick="closeVideoModal()">✕</button>
+            </div>
+            <video id="videoPlayer" class="video-player" controls>
+                <source id="videoSource" src="" type="video/mp4">
+                브라우저가 비디오 태그를 지원하지 않습니다.
+            </video>
+        </div>
+    </div>
+    
     <!-- 수정 모달 -->
     <div id="editModal" class="modal">
         <div class="modal-content">
@@ -969,14 +1042,26 @@ async def exercise_admin_page():
                     ? `${ex.image_url}${ex.image_file_name}` 
                     : 'https://via.placeholder.com/120x80?text=No+Image';
                 
+                const hasVideo = ex.video_url && ex.video_url.trim() !== '';
+                
                 return `
-                    <div class="exercise-card" onclick="openEditModal(${ex.exercise_id})">
+                    <div class="exercise-card">
                         <img src="${thumbnailUrl}" alt="${ex.title}" class="exercise-thumbnail" 
                              onerror="this.src='https://via.placeholder.com/120x80?text=No+Image'">
-                        <div class="exercise-info">
+                        <div class="exercise-info" style="flex: 1;">
                             <div class="exercise-title">${ex.title || '제목 없음'}</div>
                             <div class="exercise-standard-title">${ex.standard_title || '표준 제목 없음'}</div>
                             <div class="exercise-id">ID: ${ex.exercise_id}</div>
+                        </div>
+                        <div class="exercise-actions">
+                            ${hasVideo ? `
+                                <button class="play-video-btn" onclick="event.stopPropagation(); openVideoModal('${ex.video_url}', '${ex.title || '영상'}')">
+                                    ▶ 영상 보기
+                                </button>
+                            ` : ''}
+                            <button class="edit-btn" onclick="openEditModal(${ex.exercise_id})">
+                                ✏️ 수정
+                            </button>
                         </div>
                     </div>
                 `;
@@ -1066,6 +1151,26 @@ async def exercise_admin_page():
             document.getElementById('thumbnailPreview').innerHTML = '';
         }
         
+        function openVideoModal(videoUrl, title) {
+            const modal = document.getElementById('videoModal');
+            const videoPlayer = document.getElementById('videoPlayer');
+            const videoSource = document.getElementById('videoSource');
+            const videoTitle = document.getElementById('videoTitle');
+            
+            videoTitle.textContent = title || '영상 재생';
+            videoSource.src = videoUrl;
+            videoPlayer.load();
+            modal.classList.add('active');
+        }
+        
+        function closeVideoModal() {
+            const modal = document.getElementById('videoModal');
+            const videoPlayer = document.getElementById('videoPlayer');
+            videoPlayer.pause();
+            videoPlayer.currentTime = 0;
+            modal.classList.remove('active');
+        }
+        
         function updateThumbnailPreview() {
             const imageUrl = document.getElementById('imageUrl').value;
             const imageFileName = document.getElementById('imageFileName').value;
@@ -1143,6 +1248,12 @@ async def exercise_admin_page():
                 closeModal();
             }
         });
+        
+        document.getElementById('videoModal').addEventListener('click', (e) => {
+            if (e.target.id === 'videoModal') {
+                closeVideoModal();
+            }
+        });
     </script>
 </body>
 </html>
@@ -1156,10 +1267,10 @@ async def analyze_weekly_workout_pattern(
 ):
     """
     최근 7일간의 운동 데이터를 분석하여 패턴과 루틴을 추천합니다.
-
+    
     - **payload.weekly_logs**: 최근 7일 운동 일지 리스트 (최신순/과거순 무관)
     - **model**: OpenAI 모델 (기본: gpt-4o-mini)
-
+    
     Returns:
     - AI 패턴 분석 및 추천 루틴
     """
