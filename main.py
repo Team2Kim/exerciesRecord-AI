@@ -1460,6 +1460,10 @@ async def analyze_weekly_workout_pattern(
 if __name__ == "__main__":
     import uvicorn
     
+    if os.getenv("REFRESH_RAG_ON_START") == "1":
+        from services.rag_pipeline import refresh_rag_assets_from_env
+        refresh_rag_assets_from_env()
+    
     # 환경 변수에서 포트 설정 (CloudType 등 배포 환경 대응)
     port = int(os.getenv("PORT", 3000))  # CloudType 기본 포트 3000
     host = os.getenv("HOST", "0.0.0.0")

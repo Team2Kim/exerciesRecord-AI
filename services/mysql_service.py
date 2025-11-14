@@ -12,6 +12,28 @@ MYSQL_USER = os.getenv("MYSQL_USER")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
 
+RAG_EXERCISE_COLUMNS: List[str] = [
+    "exercise_id",
+    "title",
+    "standard_title",
+    "training_name",
+    "body_part",
+    "exercise_tool",
+    "fitness_factor_name",
+    "fitness_level_name",
+    "target_group",
+    "training_aim_name",
+    "training_place_name",
+    "training_section_name",
+    "training_step_name",
+    "description",
+    "image_url",
+    "video_url",
+    "muscles",
+    "video_length_seconds",
+    "image_file_name",
+]
+
 class MySQLService:
     def __init__(self):
         try:
@@ -170,6 +192,36 @@ class MySQLService:
             print(f"운동 업데이트 오류: {e}")
             self.conn.rollback()
             return False
+    
+    def fetch_exercises_for_rag(self) -> List[Dict[str, Any]]:
+        """
+        RAG 임베딩에 사용할 운동 메타데이터 전체 조회
+        
+        Returns:
+            List[Dict[str, Any]]: TEXT_FIELDS 및 메타데이터 필드를 포함한 운동 정보
+        """
+        try:
+            column_clause = ", ".join(RAG_EXERCISE_COLUMNS)
+            query = f"""
+                SELECT {column_clause}
+                FROM ex_muscles
+                ORDER BY exercise_id ASC
+            """
+            self.cursor.execute(query)
+            rows = self.cursor.fetchall() or []
+            
+            normalized: List[Dict[str, Any]] = []
+            for row in rows:
+                normalized.append(
+                    {
+                        column: (row.get(column, "") if isinstance(row, dict) else "")
+                        for column in RAG_EXERCISE_COLUMNS
+                    }
+                )
+            return normalized
+        except Error as e:
+            print(f"RAG용 운동 데이터 조회 오류: {e}")
+            return []
     
     def close(self):
         """연결 종료"""
