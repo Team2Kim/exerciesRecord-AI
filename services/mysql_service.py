@@ -13,10 +13,17 @@ MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
 
 RAG_EXERCISE_COLUMNS: List[str] = [
+    "fps_count",
+    "is_gookmin100",
+    "video_length_seconds",
     "exercise_id",
-    "title",
-    "standard_title",
-    "training_name",
+    "file_size",
+    "job_ymd",
+    "operation_name",
+    "repetition_count_name",
+    "resolution",
+    "set_count_name",
+    "training_week_name",
     "body_part",
     "exercise_tool",
     "fitness_factor_name",
@@ -25,13 +32,15 @@ RAG_EXERCISE_COLUMNS: List[str] = [
     "training_aim_name",
     "training_place_name",
     "training_section_name",
+    "training_sequence_name",
     "training_step_name",
-    "description",
     "image_url",
     "video_url",
-    "muscles",
-    "video_length_seconds",
+    "description",
     "image_file_name",
+    "title",
+    "standard_title",
+    "muscles",
 ]
 
 class MySQLService:
