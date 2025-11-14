@@ -100,8 +100,9 @@ class MySQLService:
                     e.video_url,
                     e.image_url,
                     e.image_file_name,
-                    e.description
-                FROM exercise e
+                    e.description,
+                    e.muscles
+                FROM ex_muscles e
                 {where_clause}
                 ORDER BY e.exercise_id ASC
                 LIMIT %s OFFSET %s
@@ -109,6 +110,14 @@ class MySQLService:
             params.extend([page_size, offset])
             self.cursor.execute(query, params)
             exercises = self.cursor.fetchall()
+            for row in exercises:
+                muscles_value = row.get("muscles")
+                if muscles_value:
+                    row["muscles"] = [
+                        muscle.strip() for muscle in muscles_value.split(",") if muscle.strip()
+                    ]
+                else:
+                    row["muscles"] = []
             
             return {
                 "exercises": exercises,
@@ -132,18 +141,28 @@ class MySQLService:
         try:
             query = """
                 SELECT 
-                    exercise_id,
-                    title,
-                    standard_title,
-                    video_url,
-                    image_url,
-                    image_file_name,
-                    description
-                FROM exercise 
-                WHERE exercise_id = %s
+                    e.exercise_id,
+                    e.title,
+                    e.standard_title,
+                    e.video_url,
+                    e.image_url,
+                    e.image_file_name,
+                    e.description,
+                    e.muscles
+                FROM ex_muscles e
+                WHERE e.exercise_id = %s
             """
             self.cursor.execute(query, (exercise_id,))
-            return self.cursor.fetchone()
+            result = self.cursor.fetchone()
+            if result:
+                muscles_value = result.get("muscles")
+                if muscles_value:
+                    result["muscles"] = [
+                        muscle.strip() for muscle in muscles_value.split(",") if muscle.strip()
+                    ]
+                else:
+                    result["muscles"] = []
+            return result
         except Error as e:
             print(f"운동 조회 오류: {e}")
             return None
@@ -201,6 +220,44 @@ class MySQLService:
             print(f"운동 업데이트 오류: {e}")
             self.conn.rollback()
             return False
+    
+    def get_exercise_muscles(self, exercise_id: int) -> List[str]:
+        """ex_muscles 뷰에서 특정 운동의 근육 리스트 조회"""
+        try:
+            query = """
+                SELECT muscles
+                FROM ex_muscles
+                WHERE exercise_id = %s
+            """
+            self.cursor.execute(query, (exercise_id,))
+            row = self.cursor.fetchone()
+            if not row or not row.get("muscles"):
+                return []
+            return [muscle.strip() for muscle in row["muscles"].split(",") if muscle.strip()]
+        except Error as e:
+            print(f"운동 근육 조회 오류: {e}")
+            return []
+    
+    def get_exercise_muscles(self, exercise_id: int) -> List[str]:
+        """
+        ex_muscles 뷰를 통해 특정 운동의 근육 정보를 조회합니다.
+        Returns:
+            List[str]: 근육 문자열 리스트 (없으면 빈 리스트)
+        """
+        try:
+            query = """
+                SELECT muscles
+                FROM ex_muscles
+                WHERE exercise_id = %s
+            """
+            self.cursor.execute(query, (exercise_id,))
+            row = self.cursor.fetchone()
+            if not row or not row.get("muscles"):
+                return []
+            return [muscle.strip() for muscle in row["muscles"].split(",") if muscle.strip()]
+        except Error as e:
+            print(f"운동 근육 조회 오류: {e}")
+            return []
     
     def fetch_exercises_for_rag(self) -> List[Dict[str, Any]]:
         """

@@ -692,6 +692,12 @@ async def exercise_admin_page():
             color: #999;
         }
         
+        .exercise-muscles {
+            margin-top: 4px;
+            font-size: 0.9rem;
+            color: #2d3748;
+        }
+        
         .pagination {
             padding: 20px 30px;
             display: flex;
@@ -1046,6 +1052,12 @@ async def exercise_admin_page():
                 const hasVideo = ex.video_url && ex.video_url.trim() !== '';
                 const videoUrlEscaped = (ex.video_url || '').replace(/'/g, "\\'");
                 const titleEscaped = (ex.title || '').replace(/'/g, "\\'");
+                const muscles = Array.isArray(ex.muscles)
+                    ? ex.muscles
+                    : (typeof ex.muscles === 'string' && ex.muscles.length > 0
+                        ? ex.muscles.split(',').map((m) => m.trim()).filter(Boolean)
+                        : []);
+                const musclesLabel = muscles.length ? muscles.join(', ') : '근육 정보 없음';
                 
                 return `
                     <div class="exercise-card" id="card-${ex.exercise_id}" data-exercise-id="${ex.exercise_id}">
@@ -1056,6 +1068,9 @@ async def exercise_admin_page():
                                 <div class="exercise-title">${ex.title || '제목 없음'}</div>
                                 <div class="exercise-standard-title">${ex.standard_title || '표준 제목 없음'}</div>
                                 <div class="exercise-id">ID: ${ex.exercise_id}</div>
+                                <div class="exercise-muscles">
+                                    <strong>근육:</strong> ${musclesLabel}
+                                </div>
                             </div>
                             <div id="edit-mode-${ex.exercise_id}" class="edit-mode" style="display: none;">
                                 <label class="inline-edit-label">제목 (Title)</label>
