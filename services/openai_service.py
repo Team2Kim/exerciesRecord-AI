@@ -537,7 +537,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 "message": f"루틴 추천 중 오류 발생: {str(e)}"
             }
 
-    def ttern_and_recommend(
+    def analyze_weekly_pattern_and_recommend(
         self,
         weekly_logs: List[Dict[str, Any]],
         model: str = "gpt-4o-mini",
