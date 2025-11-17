@@ -189,17 +189,61 @@ class OpenAIService:
             
             # 문자열 종료되지 않은 경우 처리
             if "Unterminated string" in error_msg:
-                # 에러 위치 이전까지의 완전한 JSON 구조 찾기
-                # 문자열 내부를 올바르게 추적하면서 중괄호 균형 맞추기
+                # 방법 1: 에러 위치 이전의 마지막 완전한 문자열 필드까지 찾아서 제거
+                check_limit = error_pos if error_pos else len(raw_response)
+                
+                # 에러 위치 이전에서 마지막 완전한 필드 끝 위치 찾기
+                # 역순으로 탐색하여 완전한 JSON 구조 찾기
+                for cut_pos in range(check_limit - 1, max(0, check_limit - 500), -1):
+                    # cut_pos 이전까지의 문자열로 테스트
+                    test_str = raw_response[:cut_pos]
+                    
+                    # 마지막 불완전한 필드 제거 시도
+                    # 마지막 쉼표나 콜론 이후의 불완전한 부분 제거
+                    last_comma = test_str.rfind(',')
+                    last_colon = test_str.rfind(':')
+                    last_quote = test_str.rfind('"')
+                    
+                    # 마지막 완전한 필드 끝 찾기
+                    if last_comma > last_colon and last_comma > 0:
+                        # 쉼표 이후의 불완전한 부분 제거
+                        test_str = test_str[:last_comma]
+                    elif last_colon > 0:
+                        # 콜론 이후의 불완전한 부분 제거
+                        # 콜론 이전의 필드명까지 포함
+                        field_start = test_str.rfind('"', 0, last_colon)
+                        if field_start > 0:
+                            test_str = test_str[:field_start]
+                    
+                    # 중괄호/대괄호 균형 맞추기
+                    open_braces = test_str.count('{') - test_str.count('}')
+                    open_brackets = test_str.count('[') - test_str.count(']')
+                    
+                    if open_braces > 0:
+                        test_str += '}' * open_braces
+                    if open_brackets > 0:
+                        test_str += ']' * open_brackets
+                    
+                    # 마지막 쉼표 제거 (JSON 객체 끝에는 쉼표가 없어야 함)
+                    test_str = test_str.rstrip().rstrip(',')
+                    
+                    # 닫는 중괄호 추가
+                    if not test_str.rstrip().endswith('}'):
+                        test_str += '}'
+                    
+                    try:
+                        result = json.loads(test_str)
+                        print(f"[JSON 복구] ✅ 성공 - 불완전한 필드 제거 후 파싱 (길이: {len(test_str)})")
+                        return result
+                    except:
+                        continue
+                
+                # 방법 2: 에러 위치 이전의 완전한 JSON 구조 찾기
                 open_braces = 0
                 open_brackets = 0
                 in_string = False
                 escape_next = False
                 last_valid_pos = 0
-                string_start_pos = -1
-                
-                # 에러 위치 이전까지만 확인
-                check_limit = error_pos if error_pos else len(raw_response)
                 
                 for i, char in enumerate(raw_response[:check_limit]):
                     if escape_next:
@@ -209,8 +253,6 @@ class OpenAIService:
                         escape_next = True
                         continue
                     if char == '"' and not escape_next:
-                        if not in_string:
-                            string_start_pos = i
                         in_string = not in_string
                         continue
                     if in_string:
@@ -230,32 +272,14 @@ class OpenAIService:
                             last_valid_pos = i + 1
                 
                 # 완전한 JSON 구조를 찾았으면 그 부분만 파싱
-                if last_valid_pos > 100:  # 최소한의 길이 보장
+                if last_valid_pos > 100:
                     truncated = raw_response[:last_valid_pos]
-                    print(f"[JSON 복구] 완전한 JSON 구조 발견 (길이: {last_valid_pos})")
                     try:
                         result = json.loads(truncated)
-                        print(f"[JSON 복구] ✅ 성공 - 완전한 JSON 파싱")
+                        print(f"[JSON 복구] ✅ 성공 - 완전한 JSON 구조 파싱 (길이: {last_valid_pos})")
                         return result
                     except Exception as parse_err:
                         print(f"[JSON 복구] ⚠️ 완전한 구조 파싱 실패: {str(parse_err)}")
-                
-                # 완전한 구조를 찾지 못했으면, 에러 위치 이전의 마지막 완전한 필드까지 찾기
-                # 마지막 완전한 쉼표나 중괄호 위치 찾기
-                for i in range(check_limit - 1, max(0, check_limit - 200), -1):
-                    if raw_response[i] in [',', '}', ']']:
-                        # 이 위치 이전까지가 완전한 JSON인지 확인
-                        test_str = raw_response[:i+1]
-                        # 중괄호 균형 맞추기
-                        open_count = test_str.count('{') - test_str.count('}')
-                        if open_count > 0:
-                            test_str += '}' * open_count
-                        try:
-                            result = json.loads(test_str)
-                            print(f"[JSON 복구] ✅ 성공 - 부분 JSON 파싱 (길이: {len(test_str)})")
-                            return result
-                        except:
-                            continue
             
             # 중괄호 균형이 맞지 않는 경우
             brace_count = raw_response.count('{') - raw_response.count('}')
@@ -263,10 +287,24 @@ class OpenAIService:
             
             if brace_count > 0 or bracket_count > 0:
                 print(f"[JSON 복구] 중괄호 불균형 - 중괄호: {brace_count}, 대괄호: {bracket_count}")
-                # 닫히지 않은 중괄호/대괄호 추가
+                # 먼저 불완전한 문자열 필드 제거 시도
                 repaired = raw_response
-                repaired += '}' * brace_count
-                repaired += ']' * bracket_count
+                # 마지막 불완전한 필드 제거
+                last_colon = repaired.rfind(':')
+                if last_colon > 0:
+                    # 콜론 이후의 불완전한 부분 제거
+                    field_start = repaired.rfind('"', 0, last_colon)
+                    if field_start > 0:
+                        repaired = repaired[:field_start]
+                        # 마지막 쉼표 제거
+                        repaired = repaired.rstrip().rstrip(',')
+                
+                # 닫히지 않은 중괄호/대괄호 추가
+                open_braces = repaired.count('{') - repaired.count('}')
+                open_brackets = repaired.count('[') - repaired.count(']')
+                repaired += '}' * open_braces
+                repaired += ']' * open_brackets
+                
                 try:
                     result = json.loads(repaired)
                     print(f"[JSON 복구] ✅ 성공 - 중괄호 균형 복구")
@@ -871,6 +909,18 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
 친근하고 격려하는 톤을 유지하면서 반드시 위 JSON 구조를 따르세요.
 
+⚠️ 매우 중요 - 응답 길이 제한:
+- 전체 응답은 최대 3500 토큰(약 14000자)을 초과하지 마세요.
+- 각 텍스트 필드는 간결하게 작성하세요:
+  * "consistency", "intensity_trend", "comments", "habit_observation": 각각 최대 100자
+  * "focus": 각 day별 최대 50자
+  * "notes": 각 운동별 최대 80자
+  * "progression_strategy", "recovery_guidance", "encouragement": 각각 최대 150자
+  * "weekly_overview": 각 항목 최대 60자
+  * "estimated_duration": "45분" 형식으로 간단히
+- 불필요한 설명이나 반복을 피하고 핵심만 전달하세요.
+- JSON이 완전히 닫히도록 주의하세요 (모든 중괄호와 대괄호가 올바르게 닫혀야 함).
+
 ⚠️ 매우 중요 - RAG 후보 데이터 사용 규칙:
 - recommended_routine.daily_details[].exercises[] 항목을 작성할 때는 반드시 사용자 프롬프트에 제공된 "[추천 후보 운동 데이터(JSON)]" 배열에 있는 운동만 사용하세요.
 - 위 배열에 없는 운동명, video_url, image_url 등을 절대 임의로 생성하거나 만들어내지 마세요.
@@ -894,7 +944,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     }
                 ],
                 temperature=0.7,
-                max_tokens=3000,  # JSON 파싱 실패 방지를 위해 토큰 수 증가
+                max_tokens=3500,  # 프롬프트에서 명시한 최대 토큰 수와 일치
                 response_format={"type": "json_object"}
             )
             api_elapsed = time.time() - api_start
