@@ -696,6 +696,21 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                                 for muscle in exercise_info.get("muscles", []) or []:
                                     all_muscle_counts[muscle] = all_muscle_counts.get(muscle, 0) + 1
                     
+                    # 사용자 프로필 정보를 쿼리에 포함
+                    profile_prefix = ""
+                    if profile_data:
+                        profile_parts = []
+                        if profile_data.get("targetGroup"):
+                            profile_parts.append(profile_data["targetGroup"])
+                        if profile_data.get("fitnessLevelName"):
+                            profile_parts.append(profile_data["fitnessLevelName"])
+                        if profile_data.get("fitnessFactorName"):
+                            profile_parts.append(profile_data["fitnessFactorName"])
+                        if profile_parts:
+                            profile_prefix = " ".join(profile_parts) + " "
+                    
+                    print(f"[주간 패턴 분석] 👤 사용자 프로필: {profile_prefix.strip() if profile_prefix else '없음'}")
+                    
                     # 여러 쿼리로 검색하여 다양한 운동 후보 수집
                     queries = []
                     
@@ -704,7 +719,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                         sorted_parts = sorted(body_part_counts.items(), key=lambda x: x[1])
                         if sorted_parts:
                             least_used = sorted_parts[0][0]
-                            queries.append(f"{least_used} 운동 추천")
+                            queries.append(f"{profile_prefix}{least_used} 운동 추천")
                     
                     # 2. 적게 사용된 근육 기반 (muscles 필드 활용)
                     if all_muscle_counts:
@@ -712,16 +727,16 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                         # 가장 적게 사용된 근육 2개 선택
                         for muscle_name, count in sorted_muscles[:2]:
                             if count <= 1:  # 1회 이하로 사용된 근육
-                                queries.append(f"{muscle_name} 운동")
+                                queries.append(f"{profile_prefix}{muscle_name} 운동")
                     
                     # 3. 많이 사용된 근육의 보완 운동
                     if top_muscles:
                         top_muscle = top_muscles[0].get("name", "")
                         if top_muscle:
-                            queries.append(f"{top_muscle} 보완 운동")
+                            queries.append(f"{profile_prefix}{top_muscle} 보완 운동")
                     
                     # 4. 전신 균형 운동
-                    queries.append("전신 균형 운동")
+                    queries.append(f"{profile_prefix}전신 균형 운동")
                     
                     print(f"[주간 패턴 분석] 📝 생성된 검색 쿼리: {queries[:5]}")
                     
@@ -745,6 +760,35 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                         except Exception as query_err:
                             print(f"[주간 패턴 분석] ⚠️ 쿼리 '{query}' 검색 실패: {str(query_err)}")
                             continue
+                    
+                    # 사용자 프로필에 맞게 후보 필터링 및 재정렬
+                    if profile_data and all_candidates:
+                        scored_candidates = []
+                        for candidate in all_candidates:
+                            meta = candidate.get("metadata", {}) or {}
+                            score = candidate.get("score", 0.0)
+                            
+                            # 프로필 일치도에 따라 점수 조정
+                            if profile_data.get("targetGroup"):
+                                if meta.get("target_group") == profile_data["targetGroup"]:
+                                    score += 0.3  # target_group 일치 시 점수 증가
+                                elif meta.get("target_group") and meta.get("target_group") != profile_data["targetGroup"]:
+                                    score -= 0.2  # 불일치 시 점수 감소
+                            
+                            if profile_data.get("fitnessLevelName"):
+                                if meta.get("fitness_level_name") == profile_data["fitnessLevelName"]:
+                                    score += 0.2  # fitness_level_name 일치 시 점수 증가
+                            
+                            if profile_data.get("fitnessFactorName"):
+                                if meta.get("fitness_factor_name") == profile_data["fitnessFactorName"]:
+                                    score += 0.3  # fitness_factor_name 일치 시 점수 증가
+                            
+                            scored_candidates.append((score, candidate))
+                        
+                        # 점수 순으로 정렬
+                        scored_candidates.sort(key=lambda x: x[0], reverse=True)
+                        all_candidates = [candidate for _, candidate in scored_candidates]
+                        print(f"[주간 패턴 분석] 📊 프로필 기반 재정렬 완료 (상위 3개 점수: {[f'{scored_candidates[i][0]:.2f}' for i in range(min(3, len(scored_candidates)))]})")
                     
                     rag_candidates = all_candidates[:15]  # 최대 15개
                     rag_elapsed = time.time() - rag_start
