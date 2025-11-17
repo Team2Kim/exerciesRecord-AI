@@ -134,6 +134,48 @@ class OpenAIService:
             self.exercise_rag = get_exercise_rag_service()
         except Exception as exc:
             self.exercise_rag_error = str(exc)
+    
+    @staticmethod
+    def _clean_user_profile(
+        user_profile: Optional[Dict[str, str]]
+    ) -> Dict[str, str]:
+        """사용자 프로필에서 '선택 안 함' 또는 빈 값을 제거"""
+        if not user_profile:
+            return {}
+
+        allowed_keys = {"targetGroup", "fitnessLevelName", "fitnessFactorName"}
+        cleaned: Dict[str, str] = {}
+        for key in allowed_keys:
+            value = user_profile.get(key)
+            if not value:
+                continue
+            normalized = value.strip()
+            if not normalized or normalized == "선택 안 함":
+                continue
+            cleaned[key] = normalized
+        return cleaned
+
+    def _format_user_profile_block(self, profile: Dict[str, str]) -> str:
+        """프롬프트에 사용할 사용자 프로필 설명을 생성"""
+        if not profile:
+            return (
+                "제공되지 않음 (일반적인 대상/수준/목적을 기준으로 안전한 운동을 추천하세요)."
+            )
+
+        label_map = {
+            "targetGroup": "대상 연령대",
+            "fitnessLevelName": "운동 수준",
+            "fitnessFactorName": "운동 목적",
+        }
+        lines = []
+        for key, label in label_map.items():
+            if profile.get(key):
+                lines.append(f"- {label}: {profile[key]}")
+
+        lines.append(
+            "- 위 조건에 맞춰 운동 강도, 운동 종류, 주의사항을 조정하고 부적절한 움직임은 피하세요."
+        )
+        return "\n".join(lines)
         
     def generate_workout_recommendation(
         self, 
@@ -235,13 +277,19 @@ class OpenAIService:
                 "fallback_recommendations": analysis_data.insights.recommendations
             }
     
-    def analyze_workout_log(self, workout_log: Dict[str, Any], model: str = "gpt-4o-mini") -> Dict[str, Any]:
+    def analyze_workout_log(
+        self,
+        workout_log: Dict[str, Any],
+        model: str = "gpt-4o-mini",
+        user_profile: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         """
         운동 일지 데이터를 분석하고 평가합니다.
         
         Args:
             workout_log: 외부 API에서 받은 운동 일지 데이터
             model: 사용할 OpenAI 모델 (기본값: "gpt-4o-mini")
+            user_profile: 사용자 프로필 정보 (targetGroup, fitnessLevelName, fitnessFactorName)
             
         Returns:
             Dict[str, Any]: AI 분석 결과
@@ -255,7 +303,8 @@ class OpenAIService:
         
         try:
             # 로그 데이터를 프롬프트로 변환
-            prompt = self._create_log_analysis_prompt(workout_log)
+            profile_data = self._clean_user_profile(user_profile)
+            prompt = self._create_log_analysis_prompt(workout_log, profile_data)
             
             # OpenAI API 호출 - 고정된 형식 사용
             response = self.client.chat.completions.create(
@@ -329,7 +378,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         workout_log: Dict[str, Any],
         days: int = 7,
         frequency: int = 4,
-        model: str = "gpt-4o-mini"
+        model: str = "gpt-4o-mini",
+        user_profile: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         운동 일지를 기반으로 맞춤 운동 루틴을 추천합니다.
@@ -339,6 +389,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             days: 다음 며칠간의 루틴 (기본 7일)
             frequency: 주간 운동 빈도
             model: 사용할 OpenAI 모델 (기본값: "gpt-4o-mini")
+            user_profile: 사용자 프로필 정보 (targetGroup, fitnessLevelName, fitnessFactorName)
             
         Returns:
             Dict[str, Any]: AI 추천 루틴
@@ -351,11 +402,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             }
         
         try:
-            rag_candidates = self._get_rag_candidates_for_routine(workout_log, frequency)
+            rag_candidates = self._get_rag_candidates_for_routine(workout_log, frequency, user_profile=user_profile)
 
             # 루틴 추천 프롬프트 생성
             prompt = self._create_routine_recommendation_prompt(
-                workout_log, days, frequency, rag_candidates
+                workout_log, days, frequency, rag_candidates, user_profile=user_profile
             )
             
             # OpenAI API 호출 - 고정된 JSON 형식
@@ -441,7 +492,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 - video_url과 title/standard_title의 쌍은 제공된 JSON에서 정확히 일치하는 것을 사용하세요.
 - 후보 운동 데이터를 참고해 루틴을 구성하고, 선택한 이유를 reference_videos/suggested_exercises에 명시하세요.
 - next_target_muscles는 제공된 근육 라벨 목록에서만 선택하세요.
-- JSON 형식을 엄격히 지키고, 누락된 필드가 없도록 하세요."""
+- JSON 형식을 엄격히 지키고, 누락된 필드가 없도록 하세요.
+- 반드시 최소 3일(day 1 이상 연속) 이상의 daily_routines를 작성하고, 각 day마다 최소 3개 이상의 각기 다른 운동을 포함하세요.
+- 하루에 한 가지 운동만 추천하거나 단일 복근운동(예: 싯업 한 가지)만 제시하지 말고, 대상/목적/수준에 맞는 다양한 운동 조합을 구성하세요."""
                     },
                     {
                         "role": "user",
@@ -484,10 +537,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 "message": f"루틴 추천 중 오류 발생: {str(e)}"
             }
 
-    def analyze_weekly_pattern_and_recommend(
+    def ttern_and_recommend(
         self,
         weekly_logs: List[Dict[str, Any]],
-        model: str = "gpt-4o-mini"
+        model: str = "gpt-4o-mini",
+        user_profile: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         7일치 운동 데이터를 기반으로 패턴을 분석하고 맞춤 루틴을 추천합니다.
@@ -495,6 +549,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         Args:
             weekly_logs: 날짜 역순 또는 순차 정렬된 7일치 운동 기록 리스트
             model: 사용할 OpenAI 모델 (기본값: "gpt-4o-mini")
+            user_profile: 사용자 프로필 정보 (targetGroup, fitnessLevelName, fitnessFactorName)
 
         Returns:
             Dict[str, Any]: 패턴 분석 및 루틴 추천 결과
@@ -507,7 +562,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             }
 
         try:
-            prompt, metrics = self._create_weekly_pattern_prompt(weekly_logs)
+            profile_data = self._clean_user_profile(user_profile)
+            prompt, metrics = self._create_weekly_pattern_prompt(weekly_logs, profile_data)
             
             # RAG로 운동 후보 검색
             rag_candidates = []
@@ -649,7 +705,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
 ⚠️ 중요: next_target_muscles, muscle_balance.overworked, muscle_balance.underworked 필드는 반드시 아래 근육 라벨 목록에 정확히 포함된 이름만 사용해야 합니다.
 다른 이름(예: "어깨근육", "팔근육", "복근" 등)은 절대 사용하지 마세요.
-반드시 아래 목록에서 정확한 근육명을 선택하세요."""
+반드시 아래 목록에서 정확한 근육명을 선택하세요.
+
+⚠️ 매우 중요 - 루틴 분량 조건:
+- 반드시 최소 3일 이상의 daily_details를 작성하고, 각 day마다 반드시 최소 3개 이상의 각기 다른 운동을 포함하세요.
+- 하루에 한 가지 운동만 추천하거나 단일 복근운동(예: 싯업 한 가지)만 제시하지 말고, 대상/목적/수준에 맞는 다양한 운동 조합을 구성하세요.
+- 상세한 운동명, 세트, 횟수, 휴식시간까지 포함해주세요."""
                     },
                     {
                         "role": "user",
@@ -701,15 +762,23 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 "message": f"주간 패턴 분석 중 오류 발생: {str(e)}"
             }
     
-    def _create_log_analysis_prompt(self, workout_log: Dict[str, Any]) -> str:
+    def _create_log_analysis_prompt(
+        self,
+        workout_log: Dict[str, Any],
+        user_profile: Optional[Dict[str, str]] = None,
+    ) -> str:
         """운동 일지 데이터를 프롬프트로 변환"""
         
         date = workout_log.get("date", "날짜 정보 없음")
         memo = workout_log.get("memo", "")
         exercises = workout_log.get("exercises", [])
+        profile_block = self._format_user_profile_block(user_profile or {})
         
         prompt = f"""
 사용자의 운동 일지를 분석해주세요.
+
+[사용자 프로필]
+{profile_block}
 
 [운동 일지 정보]
 날짜: {date}
@@ -720,10 +789,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         
         for i, ex_data in enumerate(exercises, 1):
             exercise = ex_data.get("exercise", {})
+            muscles_list = exercise.get('muscles', [])
+            muscles_text = ', '.join(muscles_list) if muscles_list else '정보 없음'
             prompt += f"""
 운동 {i}:
 - 운동명: {exercise.get('title', 'N/A')}
-- 근육 부위: {', '.join(exercise.get('muscles', []))}
+- 근육 부위: {muscles_text}
 - 강도: {ex_data.get('intensity', 'N/A')}
 - 운동 시간: {ex_data.get('exerciseTime', 0)}분
 - 운동 도구: {exercise.get('exerciseTool', 'N/A')}
@@ -737,6 +808,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 3. 좋은 점과 개선할 점
 4. 다음 운동을 위한 구체적인 추천
 5. 부상 예방을 위한 주의사항
+6. 사용자 프로필(targetGroup, fitnessLevelName, fitnessFactorName)이 제공되면 해당 조건에 맞는 운동 강도와 목적만 추천하고, 제공되지 않으면 일반적인 안전 기준을 따르세요.
 
 [근육 라벨 목록]
 아래 목록에 포함된 근육명만 사용하여 다음 운동을 추천할 근육(next_target_muscles)을 2~5개 선정하세요.
@@ -751,12 +823,13 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         self,
         workout_log: Dict[str, Any],
         frequency: int,
+        user_profile: Optional[Dict[str, str]] = None,
         top_k: int = 6
     ) -> List[Dict[str, Any]]:
         if not self.exercise_rag:
             return []
 
-        query = self._build_rag_query(workout_log, frequency)
+        query = self._build_rag_query(workout_log, frequency, user_profile=user_profile)
         if not query:
             return []
 
@@ -765,7 +838,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         except Exception:
             return []
 
-    def _build_rag_query(self, workout_log: Dict[str, Any], frequency: int) -> str:
+    def _build_rag_query(
+        self,
+        workout_log: Dict[str, Any],
+        frequency: int,
+        user_profile: Optional[Dict[str, str]] = None,
+    ) -> str:
         exercises = workout_log.get("exercises") or []
         muscles: List[str] = []
         body_parts: List[str] = []
@@ -788,21 +866,34 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         elif muscles:
             focus_clause = f"목표 근육: {', '.join(muscles)}. "
 
+        profile_parts: List[str] = []
+        if user_profile:
+            if user_profile.get("targetGroup"):
+                profile_parts.append(f"대상 연령: {user_profile['targetGroup']}")
+            if user_profile.get("fitnessLevelName"):
+                profile_parts.append(f"운동 수준: {user_profile['fitnessLevelName']}")
+            if user_profile.get("fitnessFactorName"):
+                profile_parts.append(f"운동 목적: {user_profile['fitnessFactorName']}")
+
+        profile_clause = " ".join(profile_parts)
         frequency_clause = f"주 {frequency}회 루틴에 적합한 운동을 추천."
 
-        return f"{focus_clause}{frequency_clause}".strip()
+        query_parts = [focus_clause, profile_clause, frequency_clause]
+        return " ".join(part for part in query_parts if part).strip()
     
     def _create_routine_recommendation_prompt(
         self, 
         workout_log: Dict[str, Any], 
         days: int, 
         frequency: int,
-        rag_candidates: Optional[List[Dict[str, Any]]] = None
+        rag_candidates: Optional[List[Dict[str, Any]]] = None,
+        user_profile: Optional[Dict[str, str]] = None,
     ) -> str:
         """운동 루틴 추천을 위한 프롬프트 생성"""
         
         date = workout_log.get("date", "날짜 정보 없음")
         exercises = workout_log.get("exercises", [])
+        profile_block = self._format_user_profile_block(user_profile or {})
         
         # 근육 그룹 추출
         muscle_groups = []
@@ -846,6 +937,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 사용자의 최근 운동 기록:
 날짜: {date}
 
+[사용자 프로필]
+{profile_block}
+
 주요 근육 그룹:
 {', '.join(unique_muscles) if unique_muscles else '기록 없음'}
 
@@ -856,6 +950,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 - 적절한 운동 강도와 빈도
 - 점진적 과부하 원칙
 - 안전하고 실천 가능한 루틴
+- 사용자 프로필(targetGroup, fitnessLevelName, fitnessFactorName)이 제공되면 그 조건에 맞는 운동만 선택하세요. 정보가 없으면 일반적인 안전 기준을 따르세요.
+- 반드시 최소 3일 이상의 분할(day 1~)을 구성하고, 각 day마다 최소 3개 이상의 각기 다른 운동을 포함하세요. 단일 운동만 추천하지 마세요.
 
 상세한 운동명, 세트, 횟수, 휴식시간까지 포함해주세요.
 
@@ -1006,7 +1102,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
         return "기타"
 
-    def _create_weekly_pattern_prompt(self, weekly_logs: List[Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+    def _create_weekly_pattern_prompt(
+        self,
+        weekly_logs: List[Dict[str, Any]],
+        user_profile: Optional[Dict[str, str]] = None,
+    ) -> Tuple[str, Dict[str, Any]]:
         """7일치 운동 기록을 프롬프트로 변환"""
 
         if not weekly_logs:
@@ -1023,6 +1123,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             )
 
         metrics = self._calculate_weekly_metrics(weekly_logs)
+        profile_block = self._format_user_profile_block(user_profile or {})
 
         intensity_summary_items = [
             f"{level} {count}회" for level, count in metrics["intensity_counts"].items()
@@ -1042,8 +1143,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             f"{entry['name']} {entry['count']}회" for entry in metrics.get("top_muscles", [])[:6]
         ) if metrics.get("top_muscles") else "데이터 없음"
 
-        prompt = """
+        prompt = f"""
 사용자의 최근 7일 운동 기록을 분석하고, 패턴을 파악해 적절한 루틴을 제안해주세요.
+
+[사용자 프로필]
+{profile_block}
 
 [7일 운동 기록]
 """
@@ -1062,9 +1166,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             if not exercises:
                 prompt += "- 기록된 운동 없음\n"
             else:
-                for ex_idx, ex_data in enumerate(exercises, 1):
-                    exercise = ex_data.get("exercise", {})
-                    prompt += f"- 운동 {ex_idx}: {exercise.get('title', '운동명 없음')} | 사용 근육: {', '.join(exercise.get('muscles', [])) or '정보 없음'} | 강도: {ex_data.get('intensity', '정보 없음')} | 시간: {ex_data.get('exerciseTime', 0)}분 | 도구: {exercise.get('exerciseTool', '정보 없음')}\n"
+                    for ex_idx, ex_data in enumerate(exercises, 1):
+                        exercise = ex_data.get("exercise", {})
+                        muscles_list = exercise.get('muscles', [])
+                        muscles_text = ', '.join(muscles_list) if muscles_list else '정보 없음'
+                        prompt += f"- 운동 {ex_idx}: {exercise.get('title', '운동명 없음')} | 사용 근육: {muscles_text} | 강도: {ex_data.get('intensity', '정보 없음')} | 시간: {ex_data.get('exerciseTime', 0)}분 | 도구: {exercise.get('exerciseTool', '정보 없음')}\n"
 
         prompt += f"""
 
@@ -1082,6 +1188,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 3. 다음 주를 위한 4~6회 분할 루틴을 구성하고 휴식일 또는 액티브 리커버리 제안 포함
 4. 점진적 과부하 전략과 컨디션 조절 팁 포함
 5. 회복을 돕는 생활 습관(수면, 영양, 스트레칭) 권장 사항 제시
+6. 사용자 프로필(targetGroup, fitnessLevelName, fitnessFactorName)이 제공되면 해당 조건에 적합한 난이도/운동 종류만 우선 추천하고, 부적절한 종목은 피하세요.
+7. 반드시 최소 3일 이상의 분할을 구성하고, 각 day마다 반드시 최소 3개 이상의 각기 다른 운동을 포함하세요. 상세한 운동명, 세트, 횟수, 휴식시간까지 포함해주세요.
 
 [근육 라벨 목록]
 아래 목록에 포함된 근육명만 사용하여 muscle_balance.overworked, muscle_balance.underworked, next_target_muscles 항목을 구성하세요.

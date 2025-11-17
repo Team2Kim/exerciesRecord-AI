@@ -4,7 +4,7 @@ FastAPI 메인 서버 애플리케이션
 """
 
 import os
-from typing import Dict, Any
+from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -312,20 +312,34 @@ async def analyze_workout_log_with_ai(
     - AI 분석 결과 (운동 평가, 추천사항)
     """
     try:
+        profile_keys = {"targetGroup", "fitnessLevelName", "fitnessFactorName"}
+        if isinstance(workout_log, dict):
+            user_profile = {
+                key: workout_log.get(key)
+                for key in profile_keys
+                if isinstance(workout_log.get(key), str) and workout_log.get(key).strip()
+            } or None
+        else:
+            user_profile = {
+                key: workout_log.get(key)
+                for key in profile_keys
+                if isinstance(workout_log.get(key), str) and workout_log.get(key).strip()
+            } or None
+        
         # OpenAI를 통한 운동 일지 분석
-        ai_analysis = openai_service.analyze_workout_log(workout_log, model=model)
+        ai_analysis = openai_service.analyze_workout_log(
+            workout_log, model=model, user_profile=user_profile
+        )
+        
+        # 기본 분석도 함께 제공 (성공/실패와 관계없이 실행)
+        basic_analysis = await analyze_daily_workout(workout_log)
         
         if not ai_analysis.get("success"):
-            # OpenAI 실패 시 기본 분석 제공
-            basic_analysis = await analyze_daily_workout(workout_log)
-        return {
+            return {
                 "success": False,
                 "message": ai_analysis.get("message", "AI 분석 실패"),
                 "basic_analysis": basic_analysis
             }
-        
-        # 기본 분석도 함께 제공
-        basic_analysis = await analyze_daily_workout(workout_log)
         
         return {
             "success": True,
@@ -1452,7 +1466,21 @@ async def analyze_weekly_workout_pattern(
 
     trimmed_logs = weekly_logs[:7]
 
-    ai_result = openai_service.analyze_weekly_pattern_and_recommend(trimmed_logs, model=model)
+    # 사용자 프로필 정보 추출
+    user_profile = {
+        "targetGroup": payload.get("targetGroup"),
+        "fitnessLevelName": payload.get("fitnessLevelName"),
+        "fitnessFactorName": payload.get("fitnessFactorName"),
+    }
+    user_profile = {
+        key: value
+        for key, value in user_profile.items()
+        if isinstance(value, str) and value.strip()
+    } or None
+
+    ai_result = openai_service.analyze_weekly_pattern_and_recommend(
+        trimmed_logs, model=model, user_profile=user_profile
+    )
 
     if not ai_result.get("success"):
         raise HTTPException(
