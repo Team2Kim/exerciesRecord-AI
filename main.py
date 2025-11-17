@@ -337,18 +337,16 @@ async def analyze_workout_log_with_ai(
         ai_analysis = openai_service.analyze_workout_log(
             workout_log, model=model, user_profile=user_profile
         )
-        
+
+        # 기본 분석도 함께 제공 (성공/실패와 관계없이 실행)
+        basic_analysis = await analyze_daily_workout(workout_log)
+
         if not ai_analysis.get("success"):
-            # OpenAI 실패 시 기본 분석 제공
-            basic_analysis = await analyze_daily_workout(workout_log)
             return {
                 "success": False,
                 "message": ai_analysis.get("message", "AI 분석 실패"),
                 "basic_analysis": basic_analysis
             }
-        
-        # 기본 분석도 함께 제공
-        basic_analysis = await analyze_daily_workout(workout_log)
         
         return {
             "success": True,

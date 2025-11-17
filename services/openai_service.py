@@ -177,6 +177,66 @@ class OpenAIService:
         )
         return "\n".join(lines)
 
+    def _profile_match_score(
+        self,
+        metadata: Dict[str, Any],
+        user_profile: Optional[Dict[str, str]],
+    ) -> int:
+        if not user_profile:
+            return 0
+
+        mapping = [
+            ("targetGroup", "target_group", 4),
+            ("fitnessLevelName", "fitness_level_name", 2),
+            ("fitnessFactorName", "fitness_factor_name", 2),
+        ]
+
+        score = 0
+        for profile_key, meta_key, weight in mapping:
+            profile_value = user_profile.get(profile_key)
+            if not profile_value:
+                continue
+            meta_value = metadata.get(meta_key)
+            if not isinstance(meta_value, str):
+                continue
+
+            meta_clean = meta_value.strip()
+            if not meta_clean:
+                continue
+            if meta_clean == profile_value:
+                score += weight
+            else:
+                score -= weight
+        return score
+
+    def _filter_candidates_by_profile(
+        self,
+        candidates: List[Dict[str, Any]],
+        user_profile: Optional[Dict[str, str]],
+    ) -> List[Dict[str, Any]]:
+        if not user_profile or not candidates:
+            return candidates
+
+        positives: List[Dict[str, Any]] = []
+        neutrals: List[Dict[str, Any]] = []
+        negatives: List[Dict[str, Any]] = []
+
+        for candidate in candidates:
+            meta = candidate.get("metadata", {}) or {}
+            score = self._profile_match_score(meta, user_profile)
+            if score > 0:
+                positives.append(candidate)
+            elif score < 0:
+                negatives.append(candidate)
+            else:
+                neutrals.append(candidate)
+
+        if positives:
+            return positives
+        if neutrals:
+            return neutrals
+        return candidates
+
     def generate_workout_recommendation(
         self, 
         analysis_data: ComprehensiveAnalysis,
@@ -616,7 +676,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                                 seen_titles.add(title)
                                 all_candidates.append(item)
                     
-                    rag_candidates = all_candidates[:15]  # 최대 15개
+                    filtered_candidates = self._filter_candidates_by_profile(
+                        all_candidates,
+                        profile_data,
+                    )
+                    rag_candidates = filtered_candidates[:15]  # 최대 15개
                 except Exception as e:
                     # RAG 실패해도 계속 진행
                     pass
@@ -810,21 +874,28 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         self,
         workout_log: Dict[str, Any],
         frequency: int,
+        user_profile: Optional[Dict[str, str]] = None,
         top_k: int = 6
     ) -> List[Dict[str, Any]]:
         if not self.exercise_rag:
             return []
 
-        query = self._build_rag_query(workout_log, frequency)
+        query = self._build_rag_query(workout_log, frequency, user_profile=user_profile)
         if not query:
             return []
 
         try:
-            return self.exercise_rag.search(query, top_k=top_k)
+            candidates = self.exercise_rag.search(query, top_k=top_k)
+            return self._filter_candidates_by_profile(candidates, user_profile)
         except Exception:
             return []
 
-    def _build_rag_query(self, workout_log: Dict[str, Any], frequency: int) -> str:
+    def _build_rag_query(
+        self,
+        workout_log: Dict[str, Any],
+        frequency: int,
+        user_profile: Optional[Dict[str, str]] = None,
+    ) -> str:
         exercises = workout_log.get("exercises") or []
         muscles: List[str] = []
         body_parts: List[str] = []
@@ -847,9 +918,20 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         elif muscles:
             focus_clause = f"목표 근육: {', '.join(muscles)}. "
 
+        profile_parts: List[str] = []
+        if user_profile:
+            if user_profile.get("targetGroup"):
+                profile_parts.append(f"대상 연령: {user_profile['targetGroup']}")
+            if user_profile.get("fitnessLevelName"):
+                profile_parts.append(f"운동 수준: {user_profile['fitnessLevelName']}")
+            if user_profile.get("fitnessFactorName"):
+                profile_parts.append(f"운동 목적: {user_profile['fitnessFactorName']}")
+
+        profile_clause = " ".join(profile_parts)
         frequency_clause = f"주 {frequency}회 루틴에 적합한 운동을 추천."
 
-        return f"{focus_clause}{frequency_clause}".strip()
+        query_parts = [focus_clause, profile_clause, frequency_clause]
+        return " ".join(part for part in query_parts if part).strip()
     
     def _create_routine_recommendation_prompt(
         self, 
