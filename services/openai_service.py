@@ -6,6 +6,7 @@ OpenAI API 서비스
 from openai import OpenAI
 import os
 import json
+import time
 from typing import Optional, Dict, Any, List, Tuple
 from models.schemas import ComprehensiveAnalysis
 from dotenv import load_dotenv
@@ -555,20 +556,28 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             Dict[str, Any]: 패턴 분석 및 루틴 추천 결과
         """
 
+        start_time = time.time()
+        print(f"[주간 패턴 분석] 시작 - 모델: {model}, 로그 수: {len(weekly_logs)}")
+        
         if not self.client:
+            print("[주간 패턴 분석] ❌ OpenAI API 키가 설정되지 않음")
             return {
                 "success": False,
                 "message": "OpenAI API 키가 설정되지 않았습니다."
             }
 
         try:
+            step_start = time.time()
             profile_data = self._clean_user_profile(user_profile)
             prompt, metrics = self._create_weekly_pattern_prompt(weekly_logs, profile_data)
+            print(f"[주간 패턴 분석] ✅ 프롬프트 생성 완료 ({time.time() - step_start:.2f}초)")
             
             # RAG로 운동 후보 검색
+            rag_start = time.time()
             rag_candidates = []
             if self.exercise_rag:
                 try:
+                    print(f"[주간 패턴 분석] 🔍 RAG 검색 시작...")
                     # 주간 패턴에서 부족한 부위나 추천 근육을 기반으로 RAG 검색
                     body_part_counts = metrics.get("body_part_counts", {})
                     top_muscles = metrics.get("top_muscles", [])
@@ -610,23 +619,42 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     # 4. 전신 균형 운동
                     queries.append("전신 균형 운동")
                     
+                    print(f"[주간 패턴 분석] 📝 생성된 검색 쿼리: {queries[:5]}")
+                    
                     # 여러 쿼리로 검색하여 중복 제거
                     all_candidates = []
                     seen_titles = set()
-                    for query in queries[:5]:  # 최대 5개 쿼리 (근육 기반 검색 추가로 증가)
-                        results = self.exercise_rag.search(query, top_k=5)
-                        for item in results:
-                            meta = item.get("metadata", {}) or {}
-                            title = meta.get("title") or meta.get("standard_title") or ""
-                            if title and title not in seen_titles:
-                                seen_titles.add(title)
-                                all_candidates.append(item)
+                    query_times = []
+                    for idx, query in enumerate(queries[:5]):  # 최대 5개 쿼리
+                        query_start = time.time()
+                        try:
+                            results = self.exercise_rag.search(query, top_k=5)
+                            query_elapsed = time.time() - query_start
+                            query_times.append(query_elapsed)
+                            print(f"[주간 패턴 분석] 🔎 쿼리 {idx+1}/{len(queries[:5])}: '{query}' - {len(results)}개 결과 ({query_elapsed:.2f}초)")
+                            for item in results:
+                                meta = item.get("metadata", {}) or {}
+                                title = meta.get("title") or meta.get("standard_title") or ""
+                                if title and title not in seen_titles:
+                                    seen_titles.add(title)
+                                    all_candidates.append(item)
+                        except Exception as query_err:
+                            print(f"[주간 패턴 분석] ⚠️ 쿼리 '{query}' 검색 실패: {str(query_err)}")
+                            continue
                     
                     rag_candidates = all_candidates[:15]  # 최대 15개
+                    rag_elapsed = time.time() - rag_start
+                    print(f"[주간 패턴 분석] ✅ RAG 검색 완료 - 총 {len(rag_candidates)}개 후보 수집 ({rag_elapsed:.2f}초, 평균 쿼리: {sum(query_times)/len(query_times) if query_times else 0:.2f}초)")
                 except Exception as e:
-                    # RAG 실패해도 계속 진행
-                    pass
+                    rag_elapsed = time.time() - rag_start
+                    print(f"[주간 패턴 분석] ❌ RAG 검색 실패 ({rag_elapsed:.2f}초): {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"[주간 패턴 분석] ⚠️ RAG 서비스 사용 불가 (exercise_rag=None)")
 
+            api_start = time.time()
+            print(f"[주간 패턴 분석] 🤖 OpenAI API 호출 시작 (모델: {model})...")
             response = self.client.chat.completions.create(
                 model=model,
                 messages=[
@@ -721,11 +749,25 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 max_tokens=2200,
                 response_format={"type": "json_object"}
             )
+            api_elapsed = time.time() - api_start
+            print(f"[주간 패턴 분석] ✅ OpenAI API 응답 수신 ({api_elapsed:.2f}초)")
+
+            if not response or not response.choices:
+                print(f"[주간 패턴 분석] ❌ OpenAI API 응답이 비어있음")
+                raise Exception("OpenAI API 응답이 비어있습니다.")
 
             ai_response = response.choices[0].message.content
+            if not ai_response:
+                print(f"[주간 패턴 분석] ❌ AI 응답 내용이 비어있음")
+                raise Exception("AI 응답 내용이 비어있습니다.")
 
+            print(f"[주간 패턴 분석] 📄 AI 응답 길이: {len(ai_response)} 문자")
+
+            parse_start = time.time()
             try:
                 parsed_response = json.loads(ai_response)
+                parse_elapsed = time.time() - parse_start
+                print(f"[주간 패턴 분석] ✅ JSON 파싱 완료 ({parse_elapsed:.2f}초)")
 
                 for key in [
                     ("next_target_muscles", parsed_response.get("next_target_muscles")),
@@ -745,9 +787,21 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                         else:
                             muscle_balance = parsed_response.setdefault("pattern_analysis", {}).setdefault("muscle_balance", {})
                             muscle_balance[field_name] = validated
-            except json.JSONDecodeError:
+                
+                # 루틴 검증
+                recommended_routine = parsed_response.get("recommended_routine", {})
+                daily_details = recommended_routine.get("daily_details", [])
+                print(f"[주간 패턴 분석] 📊 추천 루틴: {len(daily_details)}일, 총 {sum(len(day.get('exercises', [])) for day in daily_details if isinstance(day, dict))}개 운동")
+                
+            except json.JSONDecodeError as json_err:
+                parse_elapsed = time.time() - parse_start
+                print(f"[주간 패턴 분석] ❌ JSON 파싱 실패 ({parse_elapsed:.2f}초): {str(json_err)}")
+                print(f"[주간 패턴 분석] 📄 응답 일부: {ai_response[:500]}...")
                 parsed_response = {"raw_response": ai_response}
 
+            total_elapsed = time.time() - start_time
+            print(f"[주간 패턴 분석] ✅ 완료 - 총 소요 시간: {total_elapsed:.2f}초")
+            
             return {
                 "success": True,
                 "result": parsed_response,
@@ -757,6 +811,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             }
 
         except Exception as e:
+            total_elapsed = time.time() - start_time
+            print(f"[주간 패턴 분석] ❌ 오류 발생 (총 {total_elapsed:.2f}초): {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {
                 "success": False,
                 "message": f"주간 패턴 분석 중 오류 발생: {str(e)}"
