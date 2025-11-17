@@ -876,27 +876,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             {{
                 "day": 1,
                 "focus": "주요 부위 및 목표",
-                "exercises": [
-                    {{
-                        "exercise_id": "후보 데이터의 exercise_id 값 (그대로 사용)",
-                        "title": "후보 데이터의 title 값 (name 필드 대신 title 사용)",
-                        "standard_title": "후보 데이터의 standard_title 값",
-                        "sets": "세트 수",
-                        "reps": "반복 수",
-                        "rest": "휴식 시간",
-                        "notes": "폼 또는 강도 조절 팁",
-                        "body_part": "후보 데이터의 body_part 값 (그대로 사용)",
-                        "exercise_tool": "후보 데이터의 exercise_tool 값 (그대로 사용)",
-                        "description": "후보 데이터의 description 값 (그대로 사용)",
-                        "muscles": "후보 데이터의 muscles 값 (그대로 사용, muscle_name 아님)",
-                        "target_group": "후보 데이터의 target_group 값 (그대로 사용)",
-                        "fitness_factor_name": "후보 데이터의 fitness_factor_name 값 (그대로 사용)",
-                        "fitness_level_name": "후보 데이터의 fitness_level_name 값 (그대로 사용)",
-                        "video_url": "후보 데이터의 video_url 값 (반드시 제공된 값만 사용)",
-                        "video_length_seconds": "후보 데이터의 video_length_seconds 값 (그대로 사용)",
-                        "image_url": "후보 데이터의 image_url 값 (있다면 제공된 값만 사용)"
-                    }}
-                ],
+                "exercises": [1, 2, 3],
                 "estimated_duration": "예상 소요 시간"
             }}
         ],
@@ -922,12 +902,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 - JSON이 완전히 닫히도록 주의하세요 (모든 중괄호와 대괄호가 올바르게 닫혀야 함).
 
 ⚠️ 매우 중요 - RAG 후보 데이터 사용 규칙:
-- recommended_routine.daily_details[].exercises[] 항목을 작성할 때는 반드시 사용자 프롬프트에 제공된 "[추천 후보 운동 데이터(JSON)]" 배열에 있는 운동만 사용하세요.
-- 위 배열에 없는 운동명, video_url, image_url 등을 절대 임의로 생성하거나 만들어내지 마세요.
-- 각 운동의 모든 필드(exercise_id, video_url, video_length_seconds, title, standard_title, body_part, exercise_tool, description, muscles, target_group, fitness_factor_name, fitness_level_name 등)는 반드시 제공된 JSON 배열에서 가져온 값을 그대로 사용하세요.
-- title 필드를 사용하세요 (name 필드는 사용하지 마세요).
-- muscles 필드를 사용하세요 (muscle_name이 아닙니다).
-- video_url과 title/standard_title의 쌍은 제공된 JSON에서 정확히 일치하는 것을 사용하세요.
+- recommended_routine.daily_details[].exercises[] 필드는 반드시 숫자 배열로 작성하세요 (예: [1, 2, 3]).
+- exercises 배열에는 후보 운동 데이터의 exercise_id 값만 포함하세요.
+- exercise_id는 사용자 프롬프트에 제공된 "[추천 후보 운동 데이터(JSON)]" 배열에 있는 운동의 exercise_id 값만 사용하세요.
+- 위 배열에 없는 exercise_id를 절대 임의로 생성하거나 만들어내지 마세요.
+- 각 exercise_id는 반드시 제공된 JSON 배열에서 가져온 값을 그대로 사용하세요.
 
 ⚠️ 중요: next_target_muscles, muscle_balance.overworked, muscle_balance.underworked 필드는 반드시 아래 근육 라벨 목록에 정확히 포함된 이름만 사용해야 합니다.
 다른 이름(예: "어깨근육", "팔근육", "복근" 등)은 절대 사용하지 마세요.
@@ -986,10 +965,39 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                             muscle_balance = parsed_response.setdefault("pattern_analysis", {}).setdefault("muscle_balance", {})
                             muscle_balance[field_name] = validated
                 
-                # 루틴 검증
+                # 루틴 검증 및 운동 목록을 ID만 반환하도록 변환
                 recommended_routine = parsed_response.get("recommended_routine", {})
                 daily_details = recommended_routine.get("daily_details", [])
                 print(f"[주간 패턴 분석] 📊 추천 루틴: {len(daily_details)}일, 총 {sum(len(day.get('exercises', [])) for day in daily_details if isinstance(day, dict))}개 운동")
+                
+                # 운동 목록을 exercise_id만 포함하도록 변환
+                for day in daily_details:
+                    if not isinstance(day, dict):
+                        continue
+                    exercises = day.get("exercises", [])
+                    if not isinstance(exercises, list):
+                        continue
+                    
+                    # 이미 숫자 배열인지 확인
+                    if exercises and len(exercises) > 0 and isinstance(exercises[0], (int, float)):
+                        # 이미 ID 배열이면 그대로 사용
+                        exercise_ids = [int(ex_id) for ex_id in exercises if isinstance(ex_id, (int, float))]
+                        day["exercises"] = exercise_ids
+                        print(f"[주간 패턴 분석] ✅ Day {day.get('day', '?')}: 이미 ID 배열 ({len(exercise_ids)}개)")
+                    else:
+                        # 객체 배열이면 exercise_id만 추출
+                        exercise_ids = []
+                        for ex in exercises:
+                            if isinstance(ex, dict):
+                                ex_id = ex.get("exercise_id")
+                                if ex_id is not None:
+                                    exercise_ids.append(int(ex_id))
+                            elif isinstance(ex, (int, float)):
+                                exercise_ids.append(int(ex))
+                        
+                        # exercises를 ID 목록으로 교체
+                        day["exercises"] = exercise_ids
+                        print(f"[주간 패턴 분석] 🔄 Day {day.get('day', '?')}: {len(exercise_ids)}개 운동 ID로 변환")
                 
             except json.JSONDecodeError as json_err:
                 parse_elapsed = time.time() - parse_start
