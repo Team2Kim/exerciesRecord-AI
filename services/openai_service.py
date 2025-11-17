@@ -135,6 +135,48 @@ class OpenAIService:
         except Exception as exc:
             self.exercise_rag_error = str(exc)
         
+    @staticmethod
+    def _clean_user_profile(
+        user_profile: Optional[Dict[str, str]]
+    ) -> Dict[str, str]:
+        """사용자 프로필에서 '선택 안 함' 또는 빈 값을 제거"""
+        if not user_profile:
+            return {}
+
+        allowed_keys = {"targetGroup", "fitnessLevelName", "fitnessFactorName"}
+        cleaned: Dict[str, str] = {}
+        for key in allowed_keys:
+            value = user_profile.get(key)
+            if not value:
+                continue
+            normalized = value.strip()
+            if not normalized or normalized == "선택 안 함":
+                continue
+            cleaned[key] = normalized
+        return cleaned
+
+    def _format_user_profile_block(self, profile: Dict[str, str]) -> str:
+        """프롬프트에 사용할 사용자 프로필 설명을 생성"""
+        if not profile:
+            return (
+                "제공되지 않음 (일반적인 대상/수준/목적을 기준으로 안전한 운동을 추천하세요)."
+            )
+
+        label_map = {
+            "targetGroup": "대상 연령대",
+            "fitnessLevelName": "운동 수준",
+            "fitnessFactorName": "운동 목적",
+        }
+        lines = []
+        for key, label in label_map.items():
+            if profile.get(key):
+                lines.append(f"- {label}: {profile[key]}")
+
+        lines.append(
+            "- 위 조건에 맞춰 운동 강도, 운동 종류, 주의사항을 조정하고 부적합한 움직임은 피하세요."
+        )
+        return "\n".join(lines)
+
     def generate_workout_recommendation(
         self, 
         analysis_data: ComprehensiveAnalysis,
@@ -235,7 +277,12 @@ class OpenAIService:
                 "fallback_recommendations": analysis_data.insights.recommendations
             }
     
-    def analyze_workout_log(self, workout_log: Dict[str, Any], model: str = "gpt-4o-mini") -> Dict[str, Any]:
+    def analyze_workout_log(
+        self,
+        workout_log: Dict[str, Any],
+        model: str = "gpt-4o-mini",
+        user_profile: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         """
         운동 일지 데이터를 분석하고 평가합니다.
         
@@ -255,7 +302,8 @@ class OpenAIService:
         
         try:
             # 로그 데이터를 프롬프트로 변환
-            prompt = self._create_log_analysis_prompt(workout_log)
+            profile_data = self._clean_user_profile(user_profile)
+            prompt = self._create_log_analysis_prompt(workout_log, profile_data)
             
             # OpenAI API 호출 - 고정된 형식 사용
             response = self.client.chat.completions.create(
@@ -487,7 +535,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
     def analyze_weekly_pattern_and_recommend(
         self,
         weekly_logs: List[Dict[str, Any]],
-        model: str = "gpt-4o-mini"
+        model: str = "gpt-4o-mini",
+        user_profile: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         7일치 운동 데이터를 기반으로 패턴을 분석하고 맞춤 루틴을 추천합니다.
@@ -507,7 +556,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             }
 
         try:
-            prompt, metrics = self._create_weekly_pattern_prompt(weekly_logs)
+            profile_data = self._clean_user_profile(user_profile)
+            prompt, metrics = self._create_weekly_pattern_prompt(weekly_logs, profile_data)
             
             # RAG로 운동 후보 검색
             rag_candidates = []
@@ -701,15 +751,23 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 "message": f"주간 패턴 분석 중 오류 발생: {str(e)}"
             }
     
-    def _create_log_analysis_prompt(self, workout_log: Dict[str, Any]) -> str:
+    def _create_log_analysis_prompt(
+        self,
+        workout_log: Dict[str, Any],
+        user_profile: Optional[Dict[str, str]] = None,
+    ) -> str:
         """운동 일지 데이터를 프롬프트로 변환"""
         
         date = workout_log.get("date", "날짜 정보 없음")
         memo = workout_log.get("memo", "")
         exercises = workout_log.get("exercises", [])
+        profile_block = self._format_user_profile_block(user_profile or {})
         
         prompt = f"""
 사용자의 운동 일지를 분석해주세요.
+
+[사용자 프로필]
+{profile_block}
 
 [운동 일지 정보]
 날짜: {date}
@@ -737,6 +795,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 3. 좋은 점과 개선할 점
 4. 다음 운동을 위한 구체적인 추천
 5. 부상 예방을 위한 주의사항
+6. 사용자 프로필(targetGroup, fitnessLevelName, fitnessFactorName)이 제공되면 해당 조건에 맞는 운동 강도와 목적만 추천하고, 제공되지 않으면 일반적인 안전 기준을 따르세요.
 
 [근육 라벨 목록]
 아래 목록에 포함된 근육명만 사용하여 다음 운동을 추천할 근육(next_target_muscles)을 2~5개 선정하세요.
@@ -1006,7 +1065,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
         return "기타"
 
-    def _create_weekly_pattern_prompt(self, weekly_logs: List[Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
+    def _create_weekly_pattern_prompt(
+        self,
+        weekly_logs: List[Dict[str, Any]],
+        user_profile: Optional[Dict[str, str]] = None,
+    ) -> Tuple[str, Dict[str, Any]]:
         """7일치 운동 기록을 프롬프트로 변환"""
 
         if not weekly_logs:
@@ -1023,6 +1086,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             )
 
         metrics = self._calculate_weekly_metrics(weekly_logs)
+        profile_block = self._format_user_profile_block(user_profile or {})
 
         intensity_summary_items = [
             f"{level} {count}회" for level, count in metrics["intensity_counts"].items()
@@ -1042,8 +1106,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             f"{entry['name']} {entry['count']}회" for entry in metrics.get("top_muscles", [])[:6]
         ) if metrics.get("top_muscles") else "데이터 없음"
 
-        prompt = """
+        prompt = f"""
 사용자의 최근 7일 운동 기록을 분석하고, 패턴을 파악해 적절한 루틴을 제안해주세요.
+
+[사용자 프로필]
+{profile_block}
 
 [7일 운동 기록]
 """
@@ -1082,6 +1149,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 3. 다음 주를 위한 4~6회 분할 루틴을 구성하고 휴식일 또는 액티브 리커버리 제안 포함
 4. 점진적 과부하 전략과 컨디션 조절 팁 포함
 5. 회복을 돕는 생활 습관(수면, 영양, 스트레칭) 권장 사항 제시
+6. 사용자 프로필(targetGroup, fitnessLevelName, fitnessFactorName)이 제공되면 해당 조건에 적합한 난이도/운동 종류만 우선 추천하고, 부적절한 종목은 피하세요.
 
 [근육 라벨 목록]
 아래 목록에 포함된 근육명만 사용하여 muscle_balance.overworked, muscle_balance.underworked, next_target_muscles 항목을 구성하세요.

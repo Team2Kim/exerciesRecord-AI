@@ -293,7 +293,7 @@ async def analyze_daily_workout(workout_data: Dict[str, Any]) -> Dict[str, Any]:
 
 @app.post("/api/workout-log/analyze")
 async def analyze_workout_log_with_ai(
-    workout_log: Dict[str, Any],
+    payload: Dict[str, Any],
     model: str = Query(default="gpt-4o-mini", description="사용할 OpenAI 모델 (gpt-4o-mini, gpt-4o, gpt-4)")
 ):
     """
@@ -312,13 +312,36 @@ async def analyze_workout_log_with_ai(
     - AI 분석 결과 (운동 평가, 추천사항)
     """
     try:
+        profile_keys = {"targetGroup", "fitnessLevelName", "fitnessFactorName"}
+        if isinstance(payload.get("workout_log"), dict):
+            workout_log = payload["workout_log"]
+        else:
+            workout_log = {
+                key: value
+                for key, value in payload.items()
+                if key not in profile_keys
+            }
+        user_profile = {
+            key: payload.get(key)
+            for key in profile_keys
+            if isinstance(payload.get(key), str) and payload.get(key).strip()
+        } or None
+
+        if not isinstance(workout_log, dict) or not workout_log:
+            raise HTTPException(
+                status_code=400,
+                detail="workout_log 데이터가 필요합니다."
+            )
+
         # OpenAI를 통한 운동 일지 분석
-        ai_analysis = openai_service.analyze_workout_log(workout_log, model=model)
+        ai_analysis = openai_service.analyze_workout_log(
+            workout_log, model=model, user_profile=user_profile
+        )
         
         if not ai_analysis.get("success"):
             # OpenAI 실패 시 기본 분석 제공
             basic_analysis = await analyze_daily_workout(workout_log)
-        return {
+            return {
                 "success": False,
                 "message": ai_analysis.get("message", "AI 분석 실패"),
                 "basic_analysis": basic_analysis
@@ -1452,7 +1475,20 @@ async def analyze_weekly_workout_pattern(
 
     trimmed_logs = weekly_logs[:7]
 
-    ai_result = openai_service.analyze_weekly_pattern_and_recommend(trimmed_logs, model=model)
+    user_profile = {
+        "targetGroup": payload.get("targetGroup"),
+        "fitnessLevelName": payload.get("fitnessLevelName"),
+        "fitnessFactorName": payload.get("fitnessFactorName"),
+    }
+    user_profile = {
+        key: value
+        for key, value in user_profile.items()
+        if isinstance(value, str) and value.strip()
+    } or None
+
+    ai_result = openai_service.analyze_weekly_pattern_and_recommend(
+        trimmed_logs, model=model, user_profile=user_profile
+    )
 
     if not ai_result.get("success"):
         raise HTTPException(
