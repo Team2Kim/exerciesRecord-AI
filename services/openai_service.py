@@ -177,6 +177,110 @@ class OpenAIService:
             "- 위 조건에 맞춰 운동 강도, 운동 종류, 주의사항을 조정하고 부적절한 움직임은 피하세요."
         )
         return "\n".join(lines)
+    
+    def _repair_json_response(self, raw_response: str, json_error: json.JSONDecodeError) -> Optional[Dict[str, Any]]:
+        """JSON 파싱 실패 시 복구 시도"""
+        try:
+            # 에러 위치 확인
+            error_pos = getattr(json_error, 'pos', None)
+            error_msg = str(json_error)
+            
+            print(f"[JSON 복구] 시작 - 에러 위치: {error_pos}, 메시지: {error_msg[:100]}")
+            
+            # 문자열 종료되지 않은 경우 처리
+            if "Unterminated string" in error_msg:
+                # 에러 위치 이전까지의 완전한 JSON 구조 찾기
+                # 문자열 내부를 올바르게 추적하면서 중괄호 균형 맞추기
+                open_braces = 0
+                open_brackets = 0
+                in_string = False
+                escape_next = False
+                last_valid_pos = 0
+                string_start_pos = -1
+                
+                # 에러 위치 이전까지만 확인
+                check_limit = error_pos if error_pos else len(raw_response)
+                
+                for i, char in enumerate(raw_response[:check_limit]):
+                    if escape_next:
+                        escape_next = False
+                        continue
+                    if char == '\\':
+                        escape_next = True
+                        continue
+                    if char == '"' and not escape_next:
+                        if not in_string:
+                            string_start_pos = i
+                        in_string = not in_string
+                        continue
+                    if in_string:
+                        continue
+                    
+                    if char == '{':
+                        open_braces += 1
+                    elif char == '}':
+                        open_braces -= 1
+                        if open_braces == 0 and open_brackets == 0:
+                            last_valid_pos = i + 1
+                    elif char == '[':
+                        open_brackets += 1
+                    elif char == ']':
+                        open_brackets -= 1
+                        if open_braces == 0 and open_brackets == 0:
+                            last_valid_pos = i + 1
+                
+                # 완전한 JSON 구조를 찾았으면 그 부분만 파싱
+                if last_valid_pos > 100:  # 최소한의 길이 보장
+                    truncated = raw_response[:last_valid_pos]
+                    print(f"[JSON 복구] 완전한 JSON 구조 발견 (길이: {last_valid_pos})")
+                    try:
+                        result = json.loads(truncated)
+                        print(f"[JSON 복구] ✅ 성공 - 완전한 JSON 파싱")
+                        return result
+                    except Exception as parse_err:
+                        print(f"[JSON 복구] ⚠️ 완전한 구조 파싱 실패: {str(parse_err)}")
+                
+                # 완전한 구조를 찾지 못했으면, 에러 위치 이전의 마지막 완전한 필드까지 찾기
+                # 마지막 완전한 쉼표나 중괄호 위치 찾기
+                for i in range(check_limit - 1, max(0, check_limit - 200), -1):
+                    if raw_response[i] in [',', '}', ']']:
+                        # 이 위치 이전까지가 완전한 JSON인지 확인
+                        test_str = raw_response[:i+1]
+                        # 중괄호 균형 맞추기
+                        open_count = test_str.count('{') - test_str.count('}')
+                        if open_count > 0:
+                            test_str += '}' * open_count
+                        try:
+                            result = json.loads(test_str)
+                            print(f"[JSON 복구] ✅ 성공 - 부분 JSON 파싱 (길이: {len(test_str)})")
+                            return result
+                        except:
+                            continue
+            
+            # 중괄호 균형이 맞지 않는 경우
+            brace_count = raw_response.count('{') - raw_response.count('}')
+            bracket_count = raw_response.count('[') - raw_response.count(']')
+            
+            if brace_count > 0 or bracket_count > 0:
+                print(f"[JSON 복구] 중괄호 불균형 - 중괄호: {brace_count}, 대괄호: {bracket_count}")
+                # 닫히지 않은 중괄호/대괄호 추가
+                repaired = raw_response
+                repaired += '}' * brace_count
+                repaired += ']' * bracket_count
+                try:
+                    result = json.loads(repaired)
+                    print(f"[JSON 복구] ✅ 성공 - 중괄호 균형 복구")
+                    return result
+                except Exception as repair_err:
+                    print(f"[JSON 복구] ⚠️ 중괄호 복구 실패: {str(repair_err)}")
+            
+            print(f"[JSON 복구] ❌ 모든 복구 시도 실패")
+            return None
+        except Exception as e:
+            print(f"[JSON 복구] 복구 시도 중 오류: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
         
     def generate_workout_recommendation(
         self, 
@@ -746,7 +850,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     }
                 ],
                 temperature=0.7,
-                max_tokens=2200,
+                max_tokens=3000,  # JSON 파싱 실패 방지를 위해 토큰 수 증가
                 response_format={"type": "json_object"}
             )
             api_elapsed = time.time() - api_start
@@ -796,8 +900,19 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             except json.JSONDecodeError as json_err:
                 parse_elapsed = time.time() - parse_start
                 print(f"[주간 패턴 분석] ❌ JSON 파싱 실패 ({parse_elapsed:.2f}초): {str(json_err)}")
-                print(f"[주간 패턴 분석] 📄 응답 일부: {ai_response[:500]}...")
-                parsed_response = {"raw_response": ai_response}
+                print(f"[주간 패턴 분석] 📄 응답 일부 (처음 500자): {ai_response[:500]}...")
+                print(f"[주간 패턴 분석] 📄 응답 일부 (끝 500자): ...{ai_response[-500:]}")
+                
+                # JSON 복구 시도
+                try:
+                    parsed_response = self._repair_json_response(ai_response, json_err)
+                    if parsed_response:
+                        print(f"[주간 패턴 분석] ⚠️ JSON 복구 성공 (부분 파싱)")
+                    else:
+                        parsed_response = {"raw_response": ai_response, "parse_error": str(json_err)}
+                except Exception as repair_err:
+                    print(f"[주간 패턴 분석] ❌ JSON 복구 실패: {str(repair_err)}")
+                    parsed_response = {"raw_response": ai_response, "parse_error": str(json_err)}
 
             total_elapsed = time.time() - start_time
             print(f"[주간 패턴 분석] ✅ 완료 - 총 소요 시간: {total_elapsed:.2f}초")
