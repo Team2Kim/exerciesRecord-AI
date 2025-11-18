@@ -778,6 +778,30 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     
                     print(f"[주간 패턴 분석] 📝 생성된 검색 쿼리: {queries[:5]}")
                     
+                    # 필터링 파라미터 설정
+                    target_group_filter = None
+                    exclude_target_groups = None
+                    fitness_factor_filter = None
+                    exclude_fitness_factors = None
+                    
+                    if profile_data:
+                        # 대상 그룹 필터링: 성인인 경우 유소년/노인 제외
+                        target_group = profile_data.get("targetGroup")
+                        if target_group == "성인":
+                            exclude_target_groups = ["유소년", "노인"]
+                        elif target_group:
+                            target_group_filter = target_group
+                        
+                        # 체력 요인 필터링: 근력/근지구력을 원하는 경우 유연성 제외
+                        fitness_factor = profile_data.get("fitnessFactorName")
+                        if fitness_factor:
+                            # 근력/근지구력이 포함된 경우 유연성 제외
+                            if "근력" in fitness_factor or "근지구력" in fitness_factor:
+                                exclude_fitness_factors = ["유연성"]
+                                fitness_factor_filter = fitness_factor
+                            else:
+                                fitness_factor_filter = fitness_factor
+                    
                     # 여러 쿼리로 검색하여 중복 제거
                     all_candidates = []
                     seen_titles = set()
@@ -785,7 +809,14 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     for idx, query in enumerate(queries[:5]):  # 최대 5개 쿼리
                         query_start = time.time()
                         try:
-                            results = self.exercise_rag.search(query, top_k=5)
+                            results = self.exercise_rag.search(
+                                query, 
+                                top_k=5,
+                                target_group_filter=target_group_filter,
+                                exclude_target_groups=exclude_target_groups,
+                                fitness_factor_filter=fitness_factor_filter,
+                                exclude_fitness_factors=exclude_fitness_factors,
+                            )
                             query_elapsed = time.time() - query_start
                             query_times.append(query_elapsed)
                             print(f"[주간 패턴 분석] 🔎 쿼리 {idx+1}/{len(queries[:5])}: '{query}' - {len(results)}개 결과 ({query_elapsed:.2f}초)")
@@ -1109,7 +1140,38 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             return []
 
         try:
-            return self.exercise_rag.search(query, top_k=top_k)
+            # 필터링 파라미터 설정
+            target_group_filter = None
+            exclude_target_groups = None
+            fitness_factor_filter = None
+            exclude_fitness_factors = None
+            
+            if user_profile:
+                # 대상 그룹 필터링: 성인인 경우 유소년/노인 제외
+                target_group = user_profile.get("targetGroup")
+                if target_group == "성인":
+                    exclude_target_groups = ["유소년", "노인"]
+                elif target_group:
+                    target_group_filter = target_group
+                
+                # 체력 요인 필터링: 근력/근지구력을 원하는 경우 유연성 제외
+                fitness_factor = user_profile.get("fitnessFactorName")
+                if fitness_factor:
+                    # 근력/근지구력이 포함된 경우 유연성 제외
+                    if "근력" in fitness_factor or "근지구력" in fitness_factor:
+                        exclude_fitness_factors = ["유연성"]
+                        fitness_factor_filter = fitness_factor
+                    else:
+                        fitness_factor_filter = fitness_factor
+            
+            return self.exercise_rag.search(
+                query, 
+                top_k=top_k,
+                target_group_filter=target_group_filter,
+                exclude_target_groups=exclude_target_groups,
+                fitness_factor_filter=fitness_factor_filter,
+                exclude_fitness_factors=exclude_fitness_factors,
+            )
         except Exception:
             return []
 
