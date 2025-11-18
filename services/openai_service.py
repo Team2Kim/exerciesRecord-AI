@@ -7,6 +7,7 @@ from openai import OpenAI
 import os
 import json
 import time
+import re
 from typing import Optional, Dict, Any, List, Tuple
 from models.schemas import ComprehensiveAnalysis
 from dotenv import load_dotenv
@@ -48,6 +49,10 @@ MUSCLE_NAME_MAPPING: Dict[str, List[str]] = {
     # 종아리 관련
     "종아리근육": ["장딴지근", "장딴지세갈래근", "뒤정강근"],
     "종아리": ["장딴지근", "장딴지세갈래근"],
+    
+    # 둔근/볼기근 관련
+    "볼기근": ["큰볼기근", "중간볼기근", "작은볼기근"],
+    "둔근": ["큰볼기근", "중간볼기근", "작은볼기근"],
     
     # 가슴 관련
     "가슴": ["큰가슴근", "작은가슴근"],
@@ -184,6 +189,47 @@ class OpenAIService:
                 filters["exclude_fitness_factors"] = ["유연성"]
 
         return filters
+
+    def _expand_muscle_aliases(self, muscle: str) -> List[str]:
+        """특정 근육명과 연관된 다양한 명칭/세부 근육을 반환"""
+        aliases = {muscle.strip()}
+
+        if muscle in MUSCLE_NAME_MAPPING:
+            aliases.update(MUSCLE_NAME_MAPPING[muscle])
+
+        for label in MUSCLE_LABELS:
+            if muscle in label or label in muscle:
+                aliases.add(label)
+
+        return [alias for alias in aliases if alias]
+
+    def _metadata_matches_muscle(
+        self, meta_muscles: Any, alias_tokens: List[str]
+    ) -> bool:
+        """메타데이터의 근육 정보가 원하는 근육 명칭과 일치하는지 확인"""
+        if not meta_muscles or not alias_tokens:
+            return False
+
+        if isinstance(meta_muscles, str):
+            normalized = re.split(r"[,\n/]", meta_muscles)
+            candidates = [token.strip().lower() for token in normalized if token.strip()]
+        elif isinstance(meta_muscles, list):
+            candidates = [str(token).strip().lower() for token in meta_muscles if token]
+        else:
+            candidates = [str(meta_muscles).strip().lower()]
+
+        alias_set = {alias.strip().lower() for alias in alias_tokens if alias}
+        if not alias_set:
+            return False
+
+        for candidate in candidates:
+            for alias in alias_set:
+                if not alias or not candidate:
+                    continue
+                if alias in candidate or candidate in alias:
+                    return True
+
+        return False
 
     def _format_user_profile_block(self, profile: Dict[str, str]) -> str:
         """프롬프트에 사용할 사용자 프로필 설명을 생성"""
@@ -1160,6 +1206,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
         for muscle in muscles:
             query = f"{muscle} 강화 운동"
+            alias_tokens = self._expand_muscle_aliases(muscle)
             try:
                 rag_results = self.exercise_rag.search(
                     query,
@@ -1179,6 +1226,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 ex_id = meta.get("exercise_id")
                 if ex_id is None:
                     continue
+
+                if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
+                    continue
+
                 try:
                     exercise_ids.append(int(ex_id))
                 except (TypeError, ValueError):
