@@ -921,15 +921,20 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 친근하고 격려하는 톤을 유지하면서 반드시 위 JSON 구조를 따르세요.
 
 ⚠️ 매우 중요 - 응답 길이 제한:
-- 전체 응답은 최대 3500 토큰(약 14000자)을 초과하지 마세요.
-- 각 텍스트 필드는 간결하게 작성하세요:
-  * "consistency", "intensity_trend", "comments", "habit_observation": 각각 최대 100자
-  * "focus": 각 day별 최대 50자
-  * "notes": 각 운동별 최대 80자
-  * "progression_strategy", "recovery_guidance", "encouragement": 각각 최대 150자
-  * "weekly_overview": 각 항목 최대 60자
+- 전체 응답은 최대 4000 토큰(약 16000자)을 초과하지 마세요.
+- 각 텍스트 필드는 충분히 상세하게 작성하세요:
+  * "consistency": 최대 300자 (훈련 빈도와 규칙성에 대한 상세한 분석)
+  * "intensity_trend": 최대 300자 (강도 변화와 피로 누적에 대한 상세한 평가)
+  * "comments": 최대 250자 (근육 사용 균형에 대한 종합 의견)
+  * "habit_observation": 최대 250자 (생활 패턴 및 회복 습관 관련 상세한 인사이트)
+  * "focus": 각 day별 최대 100자 (주요 부위 및 목표에 대한 설명)
+  * "notes": 각 운동별 최대 120자 (운동 수행 시 주의사항이나 팁)
+  * "progression_strategy": 최대 300자 (점진적 과부하 또는 변화를 위한 상세한 전략)
+  * "recovery_guidance": 최대 300자 (영양, 수면, 스트레칭 등 회복 팁을 상세히)
+  * "encouragement": 최대 250자 (격려 메시지)
+  * "weekly_overview": 각 항목 최대 120자 (요일별 주요 타겟과 목표를 상세히)
   * "estimated_duration": "45분" 형식으로 간단히
-- 불필요한 설명이나 반복을 피하고 핵심만 전달하세요.
+- 충분히 상세하고 도움이 되는 설명을 작성하되, 불필요한 반복은 피하세요.
 - JSON이 완전히 닫히도록 주의하세요 (모든 중괄호와 대괄호가 올바르게 닫혀야 함).
 
 ⚠️ 매우 중요 - RAG 후보 데이터 사용 규칙:
@@ -954,7 +959,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     }
                 ],
                 temperature=0.7,
-                max_tokens=3500,  # 프롬프트에서 명시한 최대 토큰 수와 일치
+                max_tokens=4000,  # 프롬프트에서 명시한 최대 토큰 수와 일치
                 response_format={"type": "json_object"}
             )
             api_elapsed = time.time() - api_start
