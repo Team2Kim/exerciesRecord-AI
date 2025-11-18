@@ -120,6 +120,43 @@ def validate_and_map_muscles(muscle_names: List[str]) -> List[str]:
     
     return result
 
+
+class OpenAIService:
+    """OpenAI API 서비스"""
+    
+    def __init__(self):
+        # API 키는 환경변수에서 로드하는 것이 안전합니다
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        self.client = OpenAI(api_key=api_key) if api_key else None
+        self.exercise_rag: Optional[ExerciseRAGService] = None
+        self.exercise_rag_error: Optional[str] = None
+
+        try:
+            self.exercise_rag = get_exercise_rag_service()
+        except Exception as exc:
+            self.exercise_rag_error = str(exc)
+    
+    @staticmethod
+    def _clean_user_profile(
+        user_profile: Optional[Dict[str, str]]
+    ) -> Dict[str, str]:
+        """사용자 프로필에서 '선택 안 함' 또는 빈 값을 제거"""
+        
+        if not user_profile:
+            return {}
+
+        allowed_keys = {"targetGroup", "fitnessLevelName", "fitnessFactorName"}
+        cleaned: Dict[str, str] = {}
+        for key in allowed_keys:
+            value = user_profile.get(key)
+            if not value:
+                continue
+            normalized = value.strip()
+            if not normalized or normalized == "선택 안 함":
+                continue
+            cleaned[key] = normalized
+        return cleaned
+
     def _build_rag_filter_options(
         self, profile_data: Optional[Dict[str, str]]
     ) -> Dict[str, Optional[Any]]:
@@ -147,42 +184,6 @@ def validate_and_map_muscles(muscle_names: List[str]) -> List[str]:
                 filters["exclude_fitness_factors"] = ["유연성"]
 
         return filters
-
-
-class OpenAIService:
-    """OpenAI API 서비스"""
-    
-    def __init__(self):
-        # API 키는 환경변수에서 로드하는 것이 안전합니다
-        api_key = os.getenv("OPENAI_API_KEY", "")
-        self.client = OpenAI(api_key=api_key) if api_key else None
-        self.exercise_rag: Optional[ExerciseRAGService] = None
-        self.exercise_rag_error: Optional[str] = None
-
-        try:
-            self.exercise_rag = get_exercise_rag_service()
-        except Exception as exc:
-            self.exercise_rag_error = str(exc)
-    
-    @staticmethod
-    def _clean_user_profile(
-        user_profile: Optional[Dict[str, str]]
-    ) -> Dict[str, str]:
-        """사용자 프로필에서 '선택 안 함' 또는 빈 값을 제거"""
-        if not user_profile:
-            return {}
-
-        allowed_keys = {"targetGroup", "fitnessLevelName", "fitnessFactorName"}
-        cleaned: Dict[str, str] = {}
-        for key in allowed_keys:
-            value = user_profile.get(key)
-            if not value:
-                continue
-            normalized = value.strip()
-            if not normalized or normalized == "선택 안 함":
-                continue
-            cleaned[key] = normalized
-        return cleaned
 
     def _format_user_profile_block(self, profile: Dict[str, str]) -> str:
         """프롬프트에 사용할 사용자 프로필 설명을 생성"""
