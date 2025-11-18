@@ -120,6 +120,34 @@ def validate_and_map_muscles(muscle_names: List[str]) -> List[str]:
     
     return result
 
+    def _build_rag_filter_options(
+        self, profile_data: Optional[Dict[str, str]]
+    ) -> Dict[str, Optional[Any]]:
+        """사용자 프로필 기반 RAG 필터 옵션 구성"""
+        filters: Dict[str, Optional[Any]] = {
+            "target_group_filter": None,
+            "exclude_target_groups": None,
+            "fitness_factor_filter": None,
+            "exclude_fitness_factors": None,
+        }
+
+        if not profile_data:
+            return filters
+
+        target_group = profile_data.get("targetGroup")
+        if target_group == "성인":
+            filters["exclude_target_groups"] = ["유소년", "노인"]
+        elif target_group:
+            filters["target_group_filter"] = target_group
+
+        fitness_factor = profile_data.get("fitnessFactorName")
+        if fitness_factor:
+            filters["fitness_factor_filter"] = fitness_factor
+            if "근력" in fitness_factor or "근지구력" in fitness_factor:
+                filters["exclude_fitness_factors"] = ["유연성"]
+
+        return filters
+
 
 class OpenAIService:
     """OpenAI API 서비스"""
@@ -500,6 +528,14 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     if isinstance(original_muscles, list):
                         validated_muscles = validate_and_map_muscles(original_muscles)
                         parsed_analysis["next_target_muscles"] = validated_muscles
+                        # next_target 근육에 맞는 RAG 운동 추가
+                        rag_exercises = self._search_exercises_for_muscles(
+                            validated_muscles,
+                            profile_data,
+                            per_muscle=3,
+                        )
+                        if rag_exercises:
+                            parsed_analysis["next_target_exercises"] = rag_exercises
             except json.JSONDecodeError:
                 # JSON 파싱 실패 시 원본 문자열 반환
                 parsed_analysis = {"raw_response": ai_analysis}
@@ -778,29 +814,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     
                     print(f"[주간 패턴 분석] 📝 생성된 검색 쿼리: {queries[:5]}")
                     
-                    # 필터링 파라미터 설정
-                    target_group_filter = None
-                    exclude_target_groups = None
-                    fitness_factor_filter = None
-                    exclude_fitness_factors = None
-                    
-                    if profile_data:
-                        # 대상 그룹 필터링: 성인인 경우 유소년/노인 제외
-                        target_group = profile_data.get("targetGroup")
-                        if target_group == "성인":
-                            exclude_target_groups = ["유소년", "노인"]
-                        elif target_group:
-                            target_group_filter = target_group
-                        
-                        # 체력 요인 필터링: 근력/근지구력을 원하는 경우 유연성 제외
-                        fitness_factor = profile_data.get("fitnessFactorName")
-                        if fitness_factor:
-                            # 근력/근지구력이 포함된 경우 유연성 제외
-                            if "근력" in fitness_factor or "근지구력" in fitness_factor:
-                                exclude_fitness_factors = ["유연성"]
-                                fitness_factor_filter = fitness_factor
-                            else:
-                                fitness_factor_filter = fitness_factor
+                    filters = self._build_rag_filter_options(profile_data)
                     
                     # 여러 쿼리로 검색하여 중복 제거
                     all_candidates = []
@@ -812,10 +826,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                             results = self.exercise_rag.search(
                                 query, 
                                 top_k=5,
-                                target_group_filter=target_group_filter,
-                                exclude_target_groups=exclude_target_groups,
-                                fitness_factor_filter=fitness_factor_filter,
-                                exclude_fitness_factors=exclude_fitness_factors,
+                                target_group_filter=filters["target_group_filter"],
+                                exclude_target_groups=filters["exclude_target_groups"],
+                                fitness_factor_filter=filters["fitness_factor_filter"],
+                                exclude_fitness_factors=filters["exclude_fitness_factors"],
                             )
                             query_elapsed = time.time() - query_start
                             query_times.append(query_elapsed)
@@ -1130,6 +1144,53 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         
         return prompt
 
+    def _search_exercises_for_muscles(
+        self,
+        muscles: List[str],
+        profile_data: Optional[Dict[str, str]] = None,
+        per_muscle: int = 3,
+    ) -> Dict[str, List[int]]:
+        """next_target_muscles에 맞는 운동을 RAG로 검색"""
+        if not self.exercise_rag or not muscles:
+            return {}
+
+        filters = self._build_rag_filter_options(profile_data)
+        muscle_exercises: Dict[str, List[int]] = {}
+
+        for muscle in muscles:
+            query = f"{muscle} 강화 운동"
+            try:
+                rag_results = self.exercise_rag.search(
+                    query,
+                    top_k=per_muscle,
+                    target_group_filter=filters["target_group_filter"],
+                    exclude_target_groups=filters["exclude_target_groups"],
+                    fitness_factor_filter=filters["fitness_factor_filter"],
+                    exclude_fitness_factors=filters["exclude_fitness_factors"],
+                )
+            except Exception as exc:
+                print(f"[RAG] ⚠️ '{muscle}' 검색 실패: {exc}")
+                continue
+
+            exercise_ids: List[int] = []
+            for item in rag_results:
+                meta = item.get("metadata") or {}
+                ex_id = meta.get("exercise_id")
+                if ex_id is None:
+                    continue
+                try:
+                    exercise_ids.append(int(ex_id))
+                except (TypeError, ValueError):
+                    continue
+
+                if len(exercise_ids) >= per_muscle:
+                    break
+
+            if exercise_ids:
+                muscle_exercises[muscle] = exercise_ids
+
+        return muscle_exercises
+
     def _get_rag_candidates_for_routine(
         self,
         workout_log: Dict[str, Any],
@@ -1145,37 +1206,16 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             return []
 
         try:
-            # 필터링 파라미터 설정
-            target_group_filter = None
-            exclude_target_groups = None
-            fitness_factor_filter = None
-            exclude_fitness_factors = None
-            
-            if user_profile:
-                # 대상 그룹 필터링: 성인인 경우 유소년/노인 제외
-                target_group = user_profile.get("targetGroup")
-                if target_group == "성인":
-                    exclude_target_groups = ["유소년", "노인"]
-                elif target_group:
-                    target_group_filter = target_group
-                
-                # 체력 요인 필터링: 근력/근지구력을 원하는 경우 유연성 제외
-                fitness_factor = user_profile.get("fitnessFactorName")
-                if fitness_factor:
-                    # 근력/근지구력이 포함된 경우 유연성 제외
-                    if "근력" in fitness_factor or "근지구력" in fitness_factor:
-                        exclude_fitness_factors = ["유연성"]
-                        fitness_factor_filter = fitness_factor
-                    else:
-                        fitness_factor_filter = fitness_factor
-            
+            profile_data = self._clean_user_profile(user_profile)
+            filters = self._build_rag_filter_options(profile_data)
+
             return self.exercise_rag.search(
                 query, 
                 top_k=top_k,
-                target_group_filter=target_group_filter,
-                exclude_target_groups=exclude_target_groups,
-                fitness_factor_filter=fitness_factor_filter,
-                exclude_fitness_factors=exclude_fitness_factors,
+                target_group_filter=filters["target_group_filter"],
+                exclude_target_groups=filters["exclude_target_groups"],
+                fitness_factor_filter=filters["fitness_factor_filter"],
+                exclude_fitness_factors=filters["exclude_fitness_factors"],
             )
         except Exception:
             return []
