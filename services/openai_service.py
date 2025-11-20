@@ -1093,6 +1093,19 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
                         if field_name == "next_target_muscles":
                             parsed_response["next_target_muscles"] = validated
+                            # next_target 근육에 맞는 RAG 운동 추가
+                            if validated and self.exercise_rag:
+                                try:
+                                    next_target_exercises = self._search_exercises_for_muscles(
+                                        validated,
+                                        profile_data,
+                                        per_muscle=3,
+                                    )
+                                    if next_target_exercises:
+                                        parsed_response["next_target_exercises"] = next_target_exercises
+                                        print(f"[주간 패턴 분석] ✅ next_target_exercises 생성 완료: {len(next_target_exercises)}개 근육별 운동")
+                                except Exception as e:
+                                    print(f"[주간 패턴 분석] ⚠️ next_target_exercises 생성 실패: {str(e)}")
                         else:
                             muscle_balance = parsed_response.setdefault("pattern_analysis", {}).setdefault("muscle_balance", {})
                             muscle_balance[field_name] = validated
@@ -1130,35 +1143,21 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             total_elapsed = time.time() - start_time
             print(f"[주간 패턴 분석] ✅ 완료 - 총 소요 시간: {total_elapsed:.2f}초")
             
-            # RAG 검색 결과를 반환 형식으로 변환
-            rag_exercises = []
+            # RAG 검색 결과를 exercise_id만 추출
+            recommended_exercise_ids = []
             if rag_candidates:
                 for candidate in rag_candidates:
                     meta = candidate.get("metadata", {}) or {}
-                    rag_exercises.append({
-                        "exercise_id": meta.get("exercise_id"),
-                        "title": meta.get("title"),
-                        "standard_title": meta.get("standard_title"),
-                        "body_part": meta.get("body_part"),
-                        "exercise_tool": meta.get("exercise_tool"),
-                        "description": meta.get("description"),
-                        "muscles": meta.get("muscles"),
-                        "video_url": meta.get("video_url"),
-                        "video_length_seconds": meta.get("video_length_seconds"),
-                        "image_url": meta.get("image_url"),
-                        "image_file_name": meta.get("image_file_name"),
-                        "target_group": meta.get("target_group"),
-                        "fitness_factor_name": meta.get("fitness_factor_name"),
-                        "fitness_level_name": meta.get("fitness_level_name"),
-                        "score": candidate.get("score")
-                    })
+                    exercise_id = meta.get("exercise_id")
+                    if exercise_id is not None:
+                        recommended_exercise_ids.append(exercise_id)
             
             return {
                 "success": True,
                 "result": parsed_response,
                 "metrics_summary": metrics,
-                "rag_sources": rag_candidates,  # 원본 RAG 결과 (하위 호환성)
-                "recommended_exercises": rag_exercises,  # RAG 검색 결과 (운동 추천)
+                "rag_sources": rag_candidates,  # 원본 RAG 결과 (전체 정보 포함, 하위 호환성)
+                "recommended_exercises": recommended_exercise_ids,  # RAG 검색 결과 (exercise_id만)
                 "muscle_analysis": muscle_analysis,  # LLM 근육 분석 결과
                 "model": model
             }
