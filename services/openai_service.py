@@ -797,25 +797,66 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             prompt, metrics = self._create_weekly_pattern_prompt(weekly_logs, profile_data)
             print(f"[주간 패턴 분석] ✅ 프롬프트 생성 완료 ({time.time() - step_start:.2f}초)")
             
-            # RAG로 운동 후보 검색
-            rag_start = time.time()
-            rag_candidates = []
+            # 1단계: LLM으로 부족한 근육 분석
+            muscle_analysis_start = time.time()
+            print(f"[주간 패턴 분석] 🧠 LLM으로 부족한 근육 분석 시작...")
+            muscle_analysis = None
             if self.exercise_rag:
                 try:
-                    print(f"[주간 패턴 분석] 🔍 RAG 검색 시작...")
-                    # 주간 패턴에서 부족한 부위나 추천 근육을 기반으로 RAG 검색
-                    body_part_counts = metrics.get("body_part_counts", {})
-                    top_muscles = metrics.get("top_muscles", [])
+                    muscle_analysis_response = self.client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": """당신은 전문 운동 코치이자 데이터 분석가입니다. 사용자의 주간 운동 기록을 분석하여 부족한 근육을 찾아주세요. 반드시 다음 JSON 형식으로만 응답하세요:
+
+{
+    "underworked_muscles": ["근육명1", "근육명2", "근육명3"],
+    "overworked_muscles": ["근육명1", "근육명2"],
+    "next_target_muscles": ["근육명1", "근육명2", "근육명3"],
+    "recommendation_focus": "부족한 근육에 대한 간단한 설명"
+}
+
+⚠️ 중요: underworked_muscles, overworked_muscles, next_target_muscles 필드는 반드시 아래 근육 라벨 목록에 정확히 포함된 이름만 사용해야 합니다.
+다른 이름(예: "어깨근육", "팔근육", "복근" 등)은 절대 사용하지 마세요.
+반드시 아래 목록에서 정확한 근육명을 선택하세요.
+
+[근육 라벨 목록]
+""" + ', '.join(MUSCLE_LABELS)
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
+                        temperature=0.7,
+                        max_tokens=1000,
+                        response_format={"type": "json_object"}
+                    )
                     
-                    # 모든 근육 사용량 계산 (부족한 근육 찾기용)
-                    all_muscle_counts = {}
-                    for log in weekly_logs:
-                        exercises = log.get("exercises", [])
-                        for ex in exercises:
-                            if isinstance(ex, dict):
-                                exercise_info = ex.get("exercise", {}) or {}
-                                for muscle in exercise_info.get("muscles", []) or []:
-                                    all_muscle_counts[muscle] = all_muscle_counts.get(muscle, 0) + 1
+                    if muscle_analysis_response and muscle_analysis_response.choices:
+                        muscle_analysis_text = muscle_analysis_response.choices[0].message.content
+                        if muscle_analysis_text:
+                            muscle_analysis = json.loads(muscle_analysis_text)
+                            
+                            # 근육 이름 검증 및 매핑
+                            for key in ["underworked_muscles", "overworked_muscles", "next_target_muscles"]:
+                                if key in muscle_analysis and isinstance(muscle_analysis[key], list):
+                                    muscle_analysis[key] = validate_and_map_muscles(muscle_analysis[key])
+                            
+                            print(f"[주간 패턴 분석] ✅ 부족한 근육 분석 완료: underworked={muscle_analysis.get('underworked_muscles', [])}, next_target={muscle_analysis.get('next_target_muscles', [])}")
+                except Exception as e:
+                    muscle_analysis_elapsed = time.time() - muscle_analysis_start
+                    print(f"[주간 패턴 분석] ⚠️ 부족한 근육 분석 실패 ({muscle_analysis_elapsed:.2f}초): {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # 2단계: LLM 분석 결과 + 유저 정보를 기반으로 RAG 검색
+            rag_start = time.time()
+            rag_candidates = []
+            if self.exercise_rag and muscle_analysis:
+                try:
+                    print(f"[주간 패턴 분석] 🔍 RAG 검색 시작 (LLM 분석 결과 기반)...")
                     
                     # 사용자 프로필 정보를 쿼리에 포함
                     profile_prefix = ""
@@ -832,34 +873,31 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     
                     print(f"[주간 패턴 분석] 👤 사용자 프로필: {profile_prefix.strip() if profile_prefix else '없음'}")
                     
-                    # 여러 쿼리로 검색하여 다양한 운동 후보 수집
+                    # LLM 분석 결과를 기반으로 검색 쿼리 생성
                     queries = []
                     
-                    # 1. 적게 사용된 부위 기반
-                    if body_part_counts:
-                        sorted_parts = sorted(body_part_counts.items(), key=lambda x: x[1])
-                        if sorted_parts:
-                            least_used = sorted_parts[0][0]
-                            queries.append(f"{profile_prefix}{least_used} 운동 추천")
+                    # 1. 부족한 근육 기반 검색
+                    underworked = muscle_analysis.get("underworked_muscles", [])
+                    for muscle in underworked[:3]:  # 상위 3개
+                        queries.append(f"{profile_prefix}{muscle} 운동")
                     
-                    # 2. 적게 사용된 근육 기반 (muscles 필드 활용)
-                    if all_muscle_counts:
-                        sorted_muscles = sorted(all_muscle_counts.items(), key=lambda x: x[1])
-                        # 가장 적게 사용된 근육 2개 선택
-                        for muscle_name, count in sorted_muscles[:2]:
-                            if count <= 1:  # 1회 이하로 사용된 근육
-                                queries.append(f"{profile_prefix}{muscle_name} 운동")
+                    # 2. 다음 타겟 근육 기반 검색
+                    next_target = muscle_analysis.get("next_target_muscles", [])
+                    for muscle in next_target[:3]:  # 상위 3개
+                        if muscle not in underworked:  # 중복 제거
+                            queries.append(f"{profile_prefix}{muscle} 운동")
                     
-                    # 3. 많이 사용된 근육의 보완 운동
-                    if top_muscles:
-                        top_muscle = top_muscles[0].get("name", "")
-                        if top_muscle:
-                            queries.append(f"{profile_prefix}{top_muscle} 보완 운동")
+                    # 3. 과사용된 근육의 보완 운동
+                    overworked = muscle_analysis.get("overworked_muscles", [])
+                    if overworked:
+                        top_overworked = overworked[0]
+                        queries.append(f"{profile_prefix}{top_overworked} 보완 운동")
                     
-                    # 4. 전신 균형 운동
-                    queries.append(f"{profile_prefix}전신 균형 운동")
+                    # 4. 전신 균형 운동 (쿼리가 부족한 경우)
+                    if len(queries) < 3:
+                        queries.append(f"{profile_prefix}전신 균형 운동")
                     
-                    print(f"[주간 패턴 분석] 📝 생성된 검색 쿼리: {queries[:5]}")
+                    print(f"[주간 패턴 분석] 📝 생성된 검색 쿼리: {queries}")
                     
                     filters = self._build_rag_filter_options(profile_data)
                     
@@ -929,8 +967,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     import traceback
                     traceback.print_exc()
             else:
-                print(f"[주간 패턴 분석] ⚠️ RAG 서비스 사용 불가 (exercise_rag=None)")
+                if not self.exercise_rag:
+                    print(f"[주간 패턴 분석] ⚠️ RAG 서비스 사용 불가 (exercise_rag=None)")
+                elif not muscle_analysis:
+                    print(f"[주간 패턴 분석] ⚠️ 부족한 근육 분석 결과가 없어 RAG 검색을 건너뜁니다")
 
+            # 3단계: 전체 분석 및 루틴 추천 (RAG 후보 없이)
             api_start = time.time()
             print(f"[주간 패턴 분석] 🤖 OpenAI API 호출 시작 (모델: {model})...")
             response = self.client.chat.completions.create(
@@ -968,7 +1010,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             {{
                 "day": 1,
                 "focus": "주요 부위 및 목표",
-                "exercises": [1, 2, 3],
+                "exercises": [],
                 "estimated_duration": "예상 소요 시간"
             }}
         ],
@@ -998,25 +1040,18 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 - 충분히 상세하고 도움이 되는 설명을 작성하되, 불필요한 반복은 피하세요.
 - JSON이 완전히 닫히도록 주의하세요 (모든 중괄호와 대괄호가 올바르게 닫혀야 함).
 
-⚠️ 매우 중요 - RAG 후보 데이터 사용 규칙:
-- recommended_routine.daily_details[].exercises[] 필드는 반드시 숫자 배열로 작성하세요 (예: [1, 2, 3]).
-- exercises 배열에는 후보 운동 데이터의 exercise_id 값만 포함하세요.
-- exercise_id는 사용자 프롬프트에 제공된 "[추천 후보 운동 데이터(JSON)]" 배열에 있는 운동의 exercise_id 값만 사용하세요.
-- 위 배열에 없는 exercise_id를 절대 임의로 생성하거나 만들어내지 마세요.
-- 각 exercise_id는 반드시 제공된 JSON 배열에서 가져온 값을 그대로 사용하세요.
-
 ⚠️ 중요: next_target_muscles, muscle_balance.overworked, muscle_balance.underworked 필드는 반드시 아래 근육 라벨 목록에 정확히 포함된 이름만 사용해야 합니다.
 다른 이름(예: "어깨근육", "팔근육", "복근" 등)은 절대 사용하지 마세요.
 반드시 아래 목록에서 정확한 근육명을 선택하세요.
 
 ⚠️ 매우 중요 - 루틴 분량 조건:
-- 반드시 최소 3일 이상의 daily_details를 작성하고, 각 day마다 반드시 최소 3개 이상의 각기 다른 운동을 포함하세요.
-- 하루에 한 가지 운동만 추천하거나 단일 복근운동(예: 싯업 한 가지)만 제시하지 말고, 대상/목적/수준에 맞는 다양한 운동 조합을 구성하세요.
-- 상세한 운동명, 세트, 횟수, 휴식시간까지 포함해주세요."""
+- 반드시 최소 3일 이상의 daily_details를 작성하세요.
+- daily_details[].exercises[] 필드는 빈 배열로 두세요. 운동 추천은 RAG 검색 결과를 통해 별도로 제공됩니다.
+- 각 day의 focus와 estimated_duration은 작성하되, 구체적인 운동 목록은 포함하지 마세요."""
                     },
                     {
                         "role": "user",
-                        "content": self._add_rag_to_weekly_prompt(prompt, rag_candidates)
+                        "content": prompt
                     }
                 ],
                 temperature=0.7,
@@ -1062,39 +1097,18 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                             muscle_balance = parsed_response.setdefault("pattern_analysis", {}).setdefault("muscle_balance", {})
                             muscle_balance[field_name] = validated
                 
-                # 루틴 검증 및 운동 목록을 ID만 반환하도록 변환
+                # 루틴 검증 (exercises는 RAG 검색 결과에서 제공되므로 빈 배열로 유지)
                 recommended_routine = parsed_response.get("recommended_routine", {})
                 daily_details = recommended_routine.get("daily_details", [])
-                print(f"[주간 패턴 분석] 📊 추천 루틴: {len(daily_details)}일, 총 {sum(len(day.get('exercises', [])) for day in daily_details if isinstance(day, dict))}개 운동")
+                print(f"[주간 패턴 분석] 📊 추천 루틴: {len(daily_details)}일")
                 
-                # 운동 목록을 exercise_id만 포함하도록 변환
+                # exercises 필드는 빈 배열로 유지 (RAG 검색 결과가 별도로 제공됨)
                 for day in daily_details:
                     if not isinstance(day, dict):
                         continue
-                    exercises = day.get("exercises", [])
-                    if not isinstance(exercises, list):
-                        continue
-                    
-                    # 이미 숫자 배열인지 확인
-                    if exercises and len(exercises) > 0 and isinstance(exercises[0], (int, float)):
-                        # 이미 ID 배열이면 그대로 사용
-                        exercise_ids = [int(ex_id) for ex_id in exercises if isinstance(ex_id, (int, float))]
-                        day["exercises"] = exercise_ids
-                        print(f"[주간 패턴 분석] ✅ Day {day.get('day', '?')}: 이미 ID 배열 ({len(exercise_ids)}개)")
-                    else:
-                        # 객체 배열이면 exercise_id만 추출
-                        exercise_ids = []
-                        for ex in exercises:
-                            if isinstance(ex, dict):
-                                ex_id = ex.get("exercise_id")
-                                if ex_id is not None:
-                                    exercise_ids.append(int(ex_id))
-                            elif isinstance(ex, (int, float)):
-                                exercise_ids.append(int(ex))
-                        
-                        # exercises를 ID 목록으로 교체
-                        day["exercises"] = exercise_ids
-                        print(f"[주간 패턴 분석] 🔄 Day {day.get('day', '?')}: {len(exercise_ids)}개 운동 ID로 변환")
+                    # exercises 필드가 없거나 비어있으면 빈 배열로 설정
+                    if "exercises" not in day or not day.get("exercises"):
+                        day["exercises"] = []
                 
             except json.JSONDecodeError as json_err:
                 parse_elapsed = time.time() - parse_start
@@ -1116,11 +1130,36 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             total_elapsed = time.time() - start_time
             print(f"[주간 패턴 분석] ✅ 완료 - 총 소요 시간: {total_elapsed:.2f}초")
             
+            # RAG 검색 결과를 반환 형식으로 변환
+            rag_exercises = []
+            if rag_candidates:
+                for candidate in rag_candidates:
+                    meta = candidate.get("metadata", {}) or {}
+                    rag_exercises.append({
+                        "exercise_id": meta.get("exercise_id"),
+                        "title": meta.get("title"),
+                        "standard_title": meta.get("standard_title"),
+                        "body_part": meta.get("body_part"),
+                        "exercise_tool": meta.get("exercise_tool"),
+                        "description": meta.get("description"),
+                        "muscles": meta.get("muscles"),
+                        "video_url": meta.get("video_url"),
+                        "video_length_seconds": meta.get("video_length_seconds"),
+                        "image_url": meta.get("image_url"),
+                        "image_file_name": meta.get("image_file_name"),
+                        "target_group": meta.get("target_group"),
+                        "fitness_factor_name": meta.get("fitness_factor_name"),
+                        "fitness_level_name": meta.get("fitness_level_name"),
+                        "score": candidate.get("score")
+                    })
+            
             return {
                 "success": True,
                 "result": parsed_response,
                 "metrics_summary": metrics,
-                "rag_sources": rag_candidates,
+                "rag_sources": rag_candidates,  # 원본 RAG 결과 (하위 호환성)
+                "recommended_exercises": rag_exercises,  # RAG 검색 결과 (운동 추천)
+                "muscle_analysis": muscle_analysis,  # LLM 근육 분석 결과
                 "model": model
             }
 
