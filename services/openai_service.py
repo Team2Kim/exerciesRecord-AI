@@ -8,7 +8,7 @@ import os
 import json
 import time
 import re
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Set
 from models.schemas import ComprehensiveAnalysis
 from dotenv import load_dotenv
 from services.exercise_rag_service import get_exercise_rag_service, ExerciseRAGService
@@ -189,6 +189,21 @@ class OpenAIService:
                 filters["exclude_fitness_factors"] = ["유연성"]
 
         return filters
+
+    def _build_profile_prefix(self, profile_data: Optional[Dict[str, str]]) -> str:
+        """RAG 검색 쿼리용 사용자 프로필 텍스트"""
+        if not profile_data:
+            return ""
+
+        profile_parts: List[str] = []
+        if profile_data.get("targetGroup"):
+            profile_parts.append(profile_data["targetGroup"])
+        if profile_data.get("fitnessLevelName"):
+            profile_parts.append(profile_data["fitnessLevelName"])
+        if profile_data.get("fitnessFactorName"):
+            profile_parts.append(profile_data["fitnessFactorName"])
+
+        return " ".join(profile_parts).strip()
 
     def _expand_muscle_aliases(self, muscle: str) -> List[str]:
         """특정 근육명과 연관된 다양한 명칭/세부 근육을 반환"""
@@ -783,6 +798,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
         start_time = time.time()
         print(f"[주간 패턴 분석] 시작 - 모델: {model}, 로그 수: {len(weekly_logs)}")
+        day_level_exercise_ids: List[int] = []
+        rag_candidates: List[Dict[str, Any]] = []
+        muscle_analysis: Optional[Dict[str, Any]] = None
         
         if not self.client:
             print("[주간 패턴 분석] ❌ OpenAI API 키가 설정되지 않음")
@@ -797,180 +815,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             prompt, metrics = self._create_weekly_pattern_prompt(weekly_logs, profile_data)
             print(f"[주간 패턴 분석] ✅ 프롬프트 생성 완료 ({time.time() - step_start:.2f}초)")
             
-            # 1단계: LLM으로 부족한 근육 분석
-            muscle_analysis_start = time.time()
-            print(f"[주간 패턴 분석] 🧠 LLM으로 부족한 근육 분석 시작...")
-            muscle_analysis = None
-            if self.exercise_rag:
-                try:
-                    muscle_analysis_response = self.client.chat.completions.create(
-                        model=model,
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": """당신은 전문 운동 코치이자 데이터 분석가입니다. 사용자의 주간 운동 기록을 분석하여 부족한 근육을 찾아주세요. 반드시 다음 JSON 형식으로만 응답하세요:
-
-{
-    "underworked_muscles": ["근육명1", "근육명2", "근육명3"],
-    "overworked_muscles": ["근육명1", "근육명2"],
-    "next_target_muscles": ["근육명1", "근육명2", "근육명3"],
-    "recommendation_focus": "부족한 근육에 대한 간단한 설명"
-}
-
-⚠️ 중요: underworked_muscles, overworked_muscles, next_target_muscles 필드는 반드시 아래 근육 라벨 목록에 정확히 포함된 이름만 사용해야 합니다.
-다른 이름(예: "어깨근육", "팔근육", "복근" 등)은 절대 사용하지 마세요.
-반드시 아래 목록에서 정확한 근육명을 선택하세요.
-
-[근육 라벨 목록]
-""" + ', '.join(MUSCLE_LABELS)
-                            },
-                            {
-                                "role": "user",
-                                "content": prompt
-                            }
-                        ],
-                        temperature=0.7,
-                        max_tokens=1000,
-                        response_format={"type": "json_object"}
-                    )
-                    
-                    if muscle_analysis_response and muscle_analysis_response.choices:
-                        muscle_analysis_text = muscle_analysis_response.choices[0].message.content
-                        if muscle_analysis_text:
-                            muscle_analysis = json.loads(muscle_analysis_text)
-                            
-                            # 근육 이름 검증 및 매핑
-                            for key in ["underworked_muscles", "overworked_muscles", "next_target_muscles"]:
-                                if key in muscle_analysis and isinstance(muscle_analysis[key], list):
-                                    muscle_analysis[key] = validate_and_map_muscles(muscle_analysis[key])
-                            
-                            print(f"[주간 패턴 분석] ✅ 부족한 근육 분석 완료: underworked={muscle_analysis.get('underworked_muscles', [])}, next_target={muscle_analysis.get('next_target_muscles', [])}")
-                except Exception as e:
-                    muscle_analysis_elapsed = time.time() - muscle_analysis_start
-                    print(f"[주간 패턴 분석] ⚠️ 부족한 근육 분석 실패 ({muscle_analysis_elapsed:.2f}초): {str(e)}")
-                    import traceback
-                    traceback.print_exc()
-            
-            # 2단계: LLM 분석 결과 + 유저 정보를 기반으로 RAG 검색
-            rag_start = time.time()
-            rag_candidates = []
-            if self.exercise_rag and muscle_analysis:
-                try:
-                    print(f"[주간 패턴 분석] 🔍 RAG 검색 시작 (LLM 분석 결과 기반)...")
-                    
-                    # 사용자 프로필 정보를 쿼리에 포함
-                    profile_prefix = ""
-                    if profile_data:
-                        profile_parts = []
-                        if profile_data.get("targetGroup"):
-                            profile_parts.append(profile_data["targetGroup"])
-                        if profile_data.get("fitnessLevelName"):
-                            profile_parts.append(profile_data["fitnessLevelName"])
-                        if profile_data.get("fitnessFactorName"):
-                            profile_parts.append(profile_data["fitnessFactorName"])
-                        if profile_parts:
-                            profile_prefix = " ".join(profile_parts) + " "
-                    
-                    print(f"[주간 패턴 분석] 👤 사용자 프로필: {profile_prefix.strip() if profile_prefix else '없음'}")
-                    
-                    # LLM 분석 결과를 기반으로 검색 쿼리 생성
-                    queries = []
-                    
-                    # 1. 부족한 근육 기반 검색
-                    underworked = muscle_analysis.get("underworked_muscles", [])
-                    for muscle in underworked[:3]:  # 상위 3개
-                        queries.append(f"{profile_prefix}{muscle} 운동")
-                    
-                    # 2. 다음 타겟 근육 기반 검색
-                    next_target = muscle_analysis.get("next_target_muscles", [])
-                    for muscle in next_target[:3]:  # 상위 3개
-                        if muscle not in underworked:  # 중복 제거
-                            queries.append(f"{profile_prefix}{muscle} 운동")
-                    
-                    # 3. 과사용된 근육의 보완 운동
-                    overworked = muscle_analysis.get("overworked_muscles", [])
-                    if overworked:
-                        top_overworked = overworked[0]
-                        queries.append(f"{profile_prefix}{top_overworked} 보완 운동")
-                    
-                    # 4. 전신 균형 운동 (쿼리가 부족한 경우)
-                    if len(queries) < 3:
-                        queries.append(f"{profile_prefix}전신 균형 운동")
-                    
-                    print(f"[주간 패턴 분석] 📝 생성된 검색 쿼리: {queries}")
-                    
-                    filters = self._build_rag_filter_options(profile_data)
-                    
-                    # 여러 쿼리로 검색하여 중복 제거
-                    all_candidates = []
-                    seen_titles = set()
-                    query_times = []
-                    for idx, query in enumerate(queries[:5]):  # 최대 5개 쿼리
-                        query_start = time.time()
-                        try:
-                            results = self.exercise_rag.search(
-                                query, 
-                                top_k=5,
-                                target_group_filter=filters["target_group_filter"],
-                                exclude_target_groups=filters["exclude_target_groups"],
-                                fitness_factor_filter=filters["fitness_factor_filter"],
-                                exclude_fitness_factors=filters["exclude_fitness_factors"],
-                            )
-                            query_elapsed = time.time() - query_start
-                            query_times.append(query_elapsed)
-                            print(f"[주간 패턴 분석] 🔎 쿼리 {idx+1}/{len(queries[:5])}: '{query}' - {len(results)}개 결과 ({query_elapsed:.2f}초)")
-                            for item in results:
-                                meta = item.get("metadata", {}) or {}
-                                title = meta.get("title") or meta.get("standard_title") or ""
-                                if title and title not in seen_titles:
-                                    seen_titles.add(title)
-                                    all_candidates.append(item)
-                        except Exception as query_err:
-                            print(f"[주간 패턴 분석] ⚠️ 쿼리 '{query}' 검색 실패: {str(query_err)}")
-                            continue
-                    
-                    # 사용자 프로필에 맞게 후보 필터링 및 재정렬
-                    if profile_data and all_candidates:
-                        scored_candidates = []
-                        for candidate in all_candidates:
-                            meta = candidate.get("metadata", {}) or {}
-                            score = candidate.get("score", 0.0)
-                            
-                            # 프로필 일치도에 따라 점수 조정
-                            if profile_data.get("targetGroup"):
-                                if meta.get("target_group") == profile_data["targetGroup"]:
-                                    score += 0.3  # target_group 일치 시 점수 증가
-                                elif meta.get("target_group") and meta.get("target_group") != profile_data["targetGroup"]:
-                                    score -= 0.2  # 불일치 시 점수 감소
-                            
-                            if profile_data.get("fitnessLevelName"):
-                                if meta.get("fitness_level_name") == profile_data["fitnessLevelName"]:
-                                    score += 0.2  # fitness_level_name 일치 시 점수 증가
-                            
-                            if profile_data.get("fitnessFactorName"):
-                                if meta.get("fitness_factor_name") == profile_data["fitnessFactorName"]:
-                                    score += 0.3  # fitness_factor_name 일치 시 점수 증가
-                            
-                            scored_candidates.append((score, candidate))
-                        
-                        # 점수 순으로 정렬
-                        scored_candidates.sort(key=lambda x: x[0], reverse=True)
-                        all_candidates = [candidate for _, candidate in scored_candidates]
-                        print(f"[주간 패턴 분석] 📊 프로필 기반 재정렬 완료 (상위 3개 점수: {[f'{scored_candidates[i][0]:.2f}' for i in range(min(3, len(scored_candidates)))]})")
-                    
-                    rag_candidates = all_candidates[:15]  # 최대 15개
-                    rag_elapsed = time.time() - rag_start
-                    print(f"[주간 패턴 분석] ✅ RAG 검색 완료 - 총 {len(rag_candidates)}개 후보 수집 ({rag_elapsed:.2f}초, 평균 쿼리: {sum(query_times)/len(query_times) if query_times else 0:.2f}초)")
-                except Exception as e:
-                    rag_elapsed = time.time() - rag_start
-                    print(f"[주간 패턴 분석] ❌ RAG 검색 실패 ({rag_elapsed:.2f}초): {str(e)}")
-                    import traceback
-                    traceback.print_exc()
-            else:
-                if not self.exercise_rag:
-                    print(f"[주간 패턴 분석] ⚠️ RAG 서비스 사용 불가 (exercise_rag=None)")
-                elif not muscle_analysis:
-                    print(f"[주간 패턴 분석] ⚠️ 부족한 근육 분석 결과가 없어 RAG 검색을 건너뜁니다")
+            if not self.exercise_rag:
+                print(f"[주간 패턴 분석] ⚠️ RAG 서비스 사용 불가 (exercise_rag=None)")
 
             # 3단계: 전체 분석 및 루틴 추천 (RAG 후보 없이)
             api_start = time.time()
@@ -1010,6 +856,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             {{
                 "day": 1,
                 "focus": "주요 부위 및 목표",
+                    "target_muscles": ["근육명1", "근육명2"],
                 "exercises": [],
                 "estimated_duration": "예상 소요 시간"
             }}
@@ -1046,7 +893,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
 ⚠️ 매우 중요 - 루틴 분량 조건:
 - 반드시 최소 3일 이상의 daily_details를 작성하세요.
-- daily_details[].exercises[] 필드는 빈 배열로 두세요. 운동 추천은 RAG 검색 결과를 통해 별도로 제공됩니다.
+- daily_details[].target_muscles 필드는 MUSCLE_LABELS에 포함된 명칭 2~4개로 작성하세요.
+- daily_details[].exercises[] 필드는 빈 배열로 두세요. 이후 시스템이 RAG 검색 결과로 채웁니다.
 - 각 day의 focus와 estimated_duration은 작성하되, 구체적인 운동 목록은 포함하지 마세요."""
                     },
                     {
@@ -1110,18 +958,31 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                             muscle_balance = parsed_response.setdefault("pattern_analysis", {}).setdefault("muscle_balance", {})
                             muscle_balance[field_name] = validated
                 
-                # 루틴 검증 (exercises는 RAG 검색 결과에서 제공되므로 빈 배열로 유지)
+                # 루틴 검증 (exercises는 후처리 RAG 결과로 채움)
                 recommended_routine = parsed_response.get("recommended_routine", {})
                 daily_details = recommended_routine.get("daily_details", [])
                 print(f"[주간 패턴 분석] 📊 추천 루틴: {len(daily_details)}일")
                 
-                # exercises 필드는 빈 배열로 유지 (RAG 검색 결과가 별도로 제공됨)
+                # exercises 필드는 기본적으로 빈 배열로 설정
                 for day in daily_details:
                     if not isinstance(day, dict):
                         continue
                     # exercises 필드가 없거나 비어있으면 빈 배열로 설정
                     if "exercises" not in day or not day.get("exercises"):
                         day["exercises"] = []
+
+                day_level_exercise_ids = []
+                if daily_details:
+                    (
+                        day_level_exercise_ids,
+                        rag_candidates,
+                    ) = self._populate_daily_details_with_exercises(
+                        daily_details,
+                        profile_data,
+                        fallback_muscles=parsed_response.get("next_target_muscles"),
+                    )
+
+                muscle_analysis = self._build_muscle_analysis_from_response(parsed_response)
                 
             except json.JSONDecodeError as json_err:
                 parse_elapsed = time.time() - parse_start
@@ -1144,13 +1005,31 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             print(f"[주간 패턴 분석] ✅ 완료 - 총 소요 시간: {total_elapsed:.2f}초")
             
             # RAG 검색 결과를 exercise_id만 추출
-            recommended_exercise_ids = []
+            recommended_exercise_ids: List[int] = []
             if rag_candidates:
                 for candidate in rag_candidates:
                     meta = candidate.get("metadata", {}) or {}
                     exercise_id = meta.get("exercise_id")
                     if exercise_id is not None:
-                        recommended_exercise_ids.append(exercise_id)
+                        try:
+                            recommended_exercise_ids.append(int(exercise_id))
+                        except (TypeError, ValueError):
+                            continue
+
+            if day_level_exercise_ids:
+                recommended_exercise_ids.extend(day_level_exercise_ids)
+
+            if recommended_exercise_ids:
+                deduped_ids: List[int] = []
+                seen_ids: Set[int] = set()
+                for ex_id in recommended_exercise_ids:
+                    if not isinstance(ex_id, int):
+                        continue
+                    if ex_id in seen_ids:
+                        continue
+                    seen_ids.add(ex_id)
+                    deduped_ids.append(ex_id)
+                recommended_exercise_ids = deduped_ids
             
             return {
                 "success": True,
@@ -1280,6 +1159,192 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 muscle_exercises[muscle] = exercise_ids
 
         return muscle_exercises
+
+    def _format_rag_exercise_payload(
+        self,
+        metadata: Dict[str, Any],
+        score: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """RAG 검색 결과를 루틴에서 사용할 형태로 정규화"""
+        return {
+            "exercise_id": metadata.get("exercise_id"),
+            "title": metadata.get("title"),
+            "standard_title": metadata.get("standard_title"),
+            "training_name": metadata.get("training_name"),
+            "body_part": metadata.get("body_part"),
+            "exercise_tool": metadata.get("exercise_tool"),
+            "fitness_factor_name": metadata.get("fitness_factor_name"),
+            "fitness_level_name": metadata.get("fitness_level_name"),
+            "target_group": metadata.get("target_group"),
+            "training_aim_name": metadata.get("training_aim_name"),
+            "training_place_name": metadata.get("training_place_name"),
+            "training_section_name": metadata.get("training_section_name"),
+            "training_step_name": metadata.get("training_step_name"),
+            "description": metadata.get("description"),
+            "muscles": metadata.get("muscles"),
+            "video_url": metadata.get("video_url"),
+            "video_length_seconds": metadata.get("video_length_seconds"),
+            "image_url": metadata.get("image_url"),
+            "image_file_name": metadata.get("image_file_name"),
+            "score": score,
+        }
+
+    def _search_day_exercises_with_rag(
+        self,
+        target_muscles: List[str],
+        profile_data: Optional[Dict[str, str]] = None,
+        per_day: int = 4,
+    ) -> List[Dict[str, Any]]:
+        """루틴 일자별 타겟 근육을 기반으로 실제 운동 메타데이터를 검색"""
+        if not self.exercise_rag or not target_muscles:
+            return []
+
+        filters = self._build_rag_filter_options(profile_data)
+        profile_prefix = self._build_profile_prefix(profile_data)
+        seen_ids: Set[int] = set()
+        day_exercises: List[Dict[str, Any]] = []
+
+        for muscle in target_muscles:
+            alias_tokens = self._expand_muscle_aliases(muscle)
+            prefix = f"{profile_prefix} " if profile_prefix else ""
+            query = f"{prefix}{muscle} 운동 루틴".strip()
+            try:
+                rag_results = self.exercise_rag.search(
+                    query,
+                    top_k=6,
+                    target_group_filter=filters["target_group_filter"],
+                    exclude_target_groups=filters["exclude_target_groups"],
+                    fitness_factor_filter=filters["fitness_factor_filter"],
+                    exclude_fitness_factors=filters["exclude_fitness_factors"],
+                )
+            except Exception as exc:
+                print(f"[주간 패턴 분석] ⚠️ Day RAG 검색 실패 (muscle={muscle}): {exc}")
+                continue
+
+            for item in rag_results:
+                meta = item.get("metadata") or {}
+                exercise_id = meta.get("exercise_id")
+                if exercise_id is None:
+                    continue
+
+                try:
+                    normalized_id = int(exercise_id)
+                except (TypeError, ValueError):
+                    continue
+
+                if normalized_id in seen_ids:
+                    continue
+
+                if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
+                    continue
+
+                normalized_meta = dict(meta)
+                normalized_meta["exercise_id"] = normalized_id
+
+                formatted = self._format_rag_exercise_payload(
+                    normalized_meta,
+                    score=item.get("score"),
+                )
+                day_exercises.append(formatted)
+                seen_ids.add(normalized_id)
+
+                if len(day_exercises) >= per_day:
+                    break
+
+            if len(day_exercises) >= per_day:
+                break
+
+        return day_exercises
+
+    def _populate_daily_details_with_exercises(
+        self,
+        daily_details: List[Dict[str, Any]],
+        profile_data: Optional[Dict[str, str]],
+        fallback_muscles: Optional[List[str]] = None,
+    ) -> Tuple[List[int], List[Dict[str, Any]]]:
+        """LLM 루틴 일자에 RAG 운동을 매핑하고 exercise_id 목록과 RAG 정보를 반환"""
+        if not daily_details:
+            return [], []
+
+        aggregated_ids: List[int] = []
+        fallback_validated = validate_and_map_muscles(fallback_muscles or [])
+        collected_sources: List[Dict[str, Any]] = []
+
+        prepared_items: List[Tuple[Dict[str, Any], List[str]]] = []
+        for day in daily_details:
+            if not isinstance(day, dict):
+                continue
+
+            raw_targets = day.get("target_muscles") or []
+            if not isinstance(raw_targets, list):
+                raw_targets = []
+
+            validated_targets = validate_and_map_muscles(raw_targets)
+            if not validated_targets and fallback_validated:
+                validated_targets = fallback_validated[:]
+
+            day["target_muscles"] = validated_targets
+            prepared_items.append((day, validated_targets))
+
+        if not self.exercise_rag:
+            return aggregated_ids, collected_sources
+
+        for day, targets in prepared_items:
+            if not targets:
+                day["exercises"] = []
+                continue
+
+            day_exercises = self._search_day_exercises_with_rag(
+                targets,
+                profile_data,
+                per_day=4,
+            )
+            day["exercises"] = day_exercises
+
+            for exercise in day_exercises:
+                exercise_id = exercise.get("exercise_id")
+                if isinstance(exercise_id, int):
+                    aggregated_ids.append(exercise_id)
+                collected_sources.append(
+                    {
+                        "score": exercise.get("score"),
+                        "metadata": exercise,
+                    }
+                )
+
+        return aggregated_ids, collected_sources
+
+    def _build_muscle_analysis_from_response(
+        self, parsed_response: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """LLM 루틴 응답에서 근육 분석 요약을 생성"""
+        if not parsed_response:
+            return None
+
+        pattern_analysis = parsed_response.get("pattern_analysis", {}) or {}
+        muscle_balance = pattern_analysis.get("muscle_balance", {}) or {}
+
+        underworked = muscle_balance.get("underworked") or []
+        overworked = muscle_balance.get("overworked") or []
+        next_targets = parsed_response.get("next_target_muscles") or []
+
+        validated_under = validate_and_map_muscles(underworked)
+        validated_over = validate_and_map_muscles(overworked)
+        validated_next = validate_and_map_muscles(next_targets)
+
+        recommendation_focus = (
+            pattern_analysis.get("habit_observation")
+            or pattern_analysis.get("consistency")
+            or pattern_analysis.get("intensity_trend")
+            or ""
+        )
+
+        return {
+            "underworked_muscles": validated_under,
+            "overworked_muscles": validated_over,
+            "next_target_muscles": validated_next,
+            "recommendation_focus": recommendation_focus[:250],
+        }
 
     def _get_rag_candidates_for_routine(
         self,
