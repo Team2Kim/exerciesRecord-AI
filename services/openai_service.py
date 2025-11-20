@@ -1299,18 +1299,21 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 profile_data,
                 per_day=4,
             )
-            day["exercises"] = day_exercises
+            exercise_ids: List[int] = []
 
             for exercise in day_exercises:
                 exercise_id = exercise.get("exercise_id")
                 if isinstance(exercise_id, int):
                     aggregated_ids.append(exercise_id)
+                    exercise_ids.append(exercise_id)
                 collected_sources.append(
                     {
                         "score": exercise.get("score"),
                         "metadata": exercise,
                     }
                 )
+
+            day["exercises"] = exercise_ids
 
         return aggregated_ids, collected_sources
 
