@@ -205,6 +205,52 @@ class OpenAIService:
 
         return " ".join(profile_parts).strip()
 
+    def _generate_diverse_queries(
+        self,
+        muscle: str,
+        profile_prefix: str = "",
+        extra_tags: Optional[List[str]] = None,
+        max_variations: int = 5,
+    ) -> List[str]:
+        """동일 근육에 대해 다양한 검색 쿼리를 생성"""
+        base = f"{profile_prefix} {muscle}".strip()
+        descriptors = [
+            "근력 강화 운동",
+            "안정성 향상 루틴",
+            "맨몸 운동",
+            "덤벨 루틴",
+            "밸런스 트레이닝",
+            "저강도 회복",
+            "고강도 인터벌",
+            "모빌리티 스트레칭",
+        ]
+
+        if extra_tags:
+            descriptors.extend(extra_tags)
+
+        queries: List[str] = []
+        seen: Set[str] = set()
+
+        for desc in descriptors:
+            candidate = f"{base} {desc}".strip()
+            if candidate not in seen:
+                seen.add(candidate)
+                queries.append(candidate)
+            if len(queries) >= max_variations:
+                break
+
+        # 기본 루틴/운동 쿼리도 포함
+        fallback_queries = [
+            f"{base} 운동 루틴",
+            f"{base} 운동",
+        ]
+        for candidate in fallback_queries:
+            if candidate not in seen:
+                queries.append(candidate)
+                seen.add(candidate)
+
+        return queries[:max_variations]
+
     def _expand_muscle_aliases(self, muscle: str) -> List[str]:
         """특정 근육명과 연관된 다양한 명칭/세부 근육을 반환"""
         aliases = {muscle.strip()}
@@ -1206,47 +1252,56 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
         for muscle in target_muscles:
             alias_tokens = self._expand_muscle_aliases(muscle)
-            prefix = f"{profile_prefix} " if profile_prefix else ""
-            query = f"{prefix}{muscle} 운동 루틴".strip()
-            try:
-                rag_results = self.exercise_rag.search(
-                    query,
-                    top_k=6,
-                    target_group_filter=filters["target_group_filter"],
-                    exclude_target_groups=filters["exclude_target_groups"],
-                    fitness_factor_filter=filters["fitness_factor_filter"],
-                    exclude_fitness_factors=filters["exclude_fitness_factors"],
-                )
-            except Exception as exc:
-                print(f"[주간 패턴 분석] ⚠️ Day RAG 검색 실패 (muscle={muscle}): {exc}")
-                continue
+            prefix = profile_prefix.strip()
+            query_variations = self._generate_diverse_queries(
+                muscle,
+                prefix,
+                max_variations=6,
+            )
 
-            for item in rag_results:
-                meta = item.get("metadata") or {}
-                exercise_id = meta.get("exercise_id")
-                if exercise_id is None:
-                    continue
-
+            for query in query_variations:
                 try:
-                    normalized_id = int(exercise_id)
-                except (TypeError, ValueError):
+                    rag_results = self.exercise_rag.search(
+                        query,
+                        top_k=6,
+                        target_group_filter=filters["target_group_filter"],
+                        exclude_target_groups=filters["exclude_target_groups"],
+                        fitness_factor_filter=filters["fitness_factor_filter"],
+                        exclude_fitness_factors=filters["exclude_fitness_factors"],
+                    )
+                except Exception as exc:
+                    print(f"[주간 패턴 분석] ⚠️ Day RAG 검색 실패 (muscle={muscle}, query='{query}'): {exc}")
                     continue
 
-                if normalized_id in seen_ids:
-                    continue
+                for item in rag_results:
+                    meta = item.get("metadata") or {}
+                    exercise_id = meta.get("exercise_id")
+                    if exercise_id is None:
+                        continue
 
-                if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
-                    continue
+                    try:
+                        normalized_id = int(exercise_id)
+                    except (TypeError, ValueError):
+                        continue
 
-                normalized_meta = dict(meta)
-                normalized_meta["exercise_id"] = normalized_id
+                    if normalized_id in seen_ids:
+                        continue
 
-                formatted = self._format_rag_exercise_payload(
-                    normalized_meta,
-                    score=item.get("score"),
-                )
-                day_exercises.append(formatted)
-                seen_ids.add(normalized_id)
+                    if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
+                        continue
+
+                    normalized_meta = dict(meta)
+                    normalized_meta["exercise_id"] = normalized_id
+
+                    formatted = self._format_rag_exercise_payload(
+                        normalized_meta,
+                        score=item.get("score"),
+                    )
+                    day_exercises.append(formatted)
+                    seen_ids.add(normalized_id)
+
+                    if len(day_exercises) >= per_day:
+                        break
 
                 if len(day_exercises) >= per_day:
                     break
