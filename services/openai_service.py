@@ -225,11 +225,11 @@ class OpenAIService:
             return "기타"
 
         category_keywords = {
-            "맨몸": ["맨몸", "바디웨이트", "체중", "무도구"],
-            "의자": ["의자"],
-            "짐볼": ["짐볼", "짐 볼"],
-            "폼롤러": ["폼롤러", "마사지 롤러", "스트레칭 롤러"],
-            "탄력밴드": ["탄력밴드", "밴드"],
+            "맨몸": ["맨몸", "바디웨이트", "체중", "무도구", "bodyweight"],
+            "의자": ["의자", "chair", "벤치", "bench"],
+            "짐볼": ["짐볼", "짐 볼", "gym ball", "stability ball", "fitness ball"],
+            "폼롤러": ["폼롤러", "마사지 롤러", "스트레칭 롤러", "foam roller", "foam-roller"],
+            "탄력밴드": ["탄력밴드", "밴드", "band", "resistance band", "튜빙"],
         }
 
         for category, keywords in category_keywords.items():
