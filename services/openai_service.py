@@ -253,13 +253,13 @@ class OpenAIService:
                     continue
                 exercise_info = ex.get("exercise", {}) or {}
                 title = exercise_info.get("title")
-                 tool_name = exercise_info.get("exerciseTool")
-                 tool_category = self._normalize_tool_category(tool_name)
-                 tool_counts[tool_category] = tool_counts.get(tool_category, 0) + 1
-                 if tool_name:
-                     stripped_tool = tool_name.strip()
-                     if stripped_tool:
-                         tool_names.append(stripped_tool)
+                tool_name = exercise_info.get("exerciseTool")
+                tool_category = self._normalize_tool_category(tool_name)
+                tool_counts[tool_category] = tool_counts.get(tool_category, 0) + 1
+                if tool_name:
+                    stripped_tool = tool_name.strip()
+                    if stripped_tool:
+                        tool_names.append(stripped_tool)
                 if title:
                     normalized = title.strip()
                     if normalized:
