@@ -205,6 +205,30 @@ class OpenAIService:
 
         return " ".join(profile_parts).strip()
 
+    def _normalize_tool_category(self, tool: Optional[str]) -> str:
+        """운동 도구를 지정된 범주로 정규화"""
+        if not tool:
+            return "기타"
+
+        normalized = tool.strip().lower()
+        if not normalized:
+            return "기타"
+
+        category_keywords = {
+            "맨몸": ["맨몸", "바디웨이트", "bodyweight", "체중", "무도구"],
+            "의자": ["의자", "chair", "벤치"],
+            "짐볼": ["짐볼", "짐 볼", "gym ball", "stability ball", "피트니스 볼"],
+            "폼롤러": ["폼롤러", "foam roller", "foam-roller", "마사지 롤러", "스트레칭 롤러"],
+            "탄력밴드": ["탄력밴드", "밴드", "band", "resistance band", "튜빙"],
+        }
+
+        for category, keywords in category_keywords.items():
+            for keyword in keywords:
+                if keyword in normalized:
+                    return category
+
+        return "기타"
+
     def _extract_recent_exercise_context(
         self,
         weekly_logs: List[Dict[str, Any]],
@@ -212,6 +236,15 @@ class OpenAIService:
     ) -> Dict[str, Any]:
         """최근 일지에 포함된 운동 정보를 추출하여 RAG 검색 시 참고"""
         titles: List[str] = []
+        tool_names: List[str] = []
+        tool_counts: Dict[str, int] = {
+            "맨몸": 0,
+            "의자": 0,
+            "짐볼": 0,
+            "폼롤러": 0,
+            "탄력밴드": 0,
+            "기타": 0,
+        }
 
         for log in weekly_logs:
             exercises = log.get("exercises") or []
@@ -220,6 +253,13 @@ class OpenAIService:
                     continue
                 exercise_info = ex.get("exercise", {}) or {}
                 title = exercise_info.get("title")
+                 tool_name = exercise_info.get("exerciseTool")
+                 tool_category = self._normalize_tool_category(tool_name)
+                 tool_counts[tool_category] = tool_counts.get(tool_category, 0) + 1
+                 if tool_name:
+                     stripped_tool = tool_name.strip()
+                     if stripped_tool:
+                         tool_names.append(stripped_tool)
                 if title:
                     normalized = title.strip()
                     if normalized:
@@ -236,9 +276,31 @@ class OpenAIService:
             if len(unique_titles) >= limit:
                 break
 
+        unique_tools: List[str] = []
+        tool_seen: Set[str] = set()
+        for tool in tool_names:
+            lowered = tool.lower()
+            if lowered in tool_seen:
+                continue
+            tool_seen.add(lowered)
+            unique_tools.append(tool)
+            if len(unique_tools) >= limit:
+                break
+
+        preferred_tool_category = None
+        significant_counts = {
+            category: count for category, count in tool_counts.items() if category != "기타"
+        }
+        if significant_counts:
+            best_category = max(significant_counts, key=significant_counts.get)
+            if significant_counts[best_category] > 0:
+                preferred_tool_category = best_category
+
         return {
             "titles": unique_titles,
             "title_set": seen,
+            "tool_names": unique_tools,
+            "preferred_tool_category": preferred_tool_category,
         }
 
     def _generate_diverse_queries(
@@ -1291,10 +1353,20 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         seen_ids: Set[int] = set()
         day_exercises: List[Dict[str, Any]] = []
         recent_titles = (recent_context or {}).get("titles", []) or []
+        recent_tools = (recent_context or {}).get("tool_names", []) or []
+        preferred_tool_category = (recent_context or {}).get("preferred_tool_category")
         extra_tags: List[str] = []
         for title in recent_titles[:3]:
             extra_tags.append(f"{title} 대체 운동")
             extra_tags.append(f"{title} 변형 루틴")
+        for tool_name in recent_tools[:3]:
+            extra_tags.append(f"{tool_name} 응용 운동")
+            extra_tags.append(f"{tool_name} 활용 루틴")
+        if preferred_tool_category:
+            extra_tags.append(f"{preferred_tool_category} 도구 운동")
+            extra_tags.append(f"{preferred_tool_category} 중심 루틴")
+
+        candidate_pool: List[Tuple[int, Dict[str, Any]]] = []
 
         for muscle in target_muscles:
             alias_tokens = self._expand_muscle_aliases(muscle)
@@ -1347,17 +1419,42 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                         normalized_meta,
                         score=item.get("score"),
                     )
-                    day_exercises.append(formatted)
                     seen_ids.add(normalized_id)
 
-                    if len(day_exercises) >= per_day:
-                        break
+                    meta_tool = (meta.get("exercise_tool") or "").strip()
+                    meta_tool_category = self._normalize_tool_category(meta_tool)
+                    specific_tool_match = False
+                    for diary_tool in recent_tools[:5]:
+                        if not diary_tool:
+                            continue
+                        diary_lower = diary_tool.lower()
+                        meta_lower = meta_tool.lower()
+                        if diary_lower and meta_lower and (
+                            diary_lower in meta_lower or meta_lower in diary_lower
+                        ):
+                            specific_tool_match = True
+                            break
+
+                    priority = 2
+                    if specific_tool_match:
+                        priority = 0
+                    elif preferred_tool_category and meta_tool_category == preferred_tool_category:
+                        priority = 1
+
+                    candidate_pool.append((priority, formatted))
 
                 if len(day_exercises) >= per_day:
                     break
 
             if len(day_exercises) >= per_day:
                 break
+
+        if candidate_pool:
+            candidate_pool.sort(key=lambda entry: entry[0])
+            for _, formatted in candidate_pool:
+                day_exercises.append(formatted)
+                if len(day_exercises) >= per_day:
+                    break
 
         if not day_exercises and global_exclude_ids and not allow_reuse:
             return self._search_day_exercises_with_rag(
