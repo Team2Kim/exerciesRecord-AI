@@ -171,16 +171,26 @@ class OpenAIService:
             "exclude_target_groups": None,
             "fitness_factor_filter": None,
             "exclude_fitness_factors": None,
+            "allowed_target_groups": None,
         }
 
         if not profile_data:
             return filters
 
         target_group = profile_data.get("targetGroup")
-        if target_group == "성인":
-            filters["exclude_target_groups"] = ["유소년", "노인"]
-        elif target_group:
-            filters["target_group_filter"] = target_group
+        if target_group:
+            all_groups = ["유소년", "청소년", "성인", "어르신", "공통"]
+            allowed_groups: List[str]
+
+            if target_group == "공통":
+                allowed_groups = ["공통"]
+            else:
+                allowed_groups = [target_group, "공통"]
+
+            filters["allowed_target_groups"] = allowed_groups
+            filters["exclude_target_groups"] = [
+                group for group in all_groups if group not in allowed_groups
+            ] or None
 
         fitness_factor = profile_data.get("fitnessFactorName")
         if fitness_factor:
@@ -215,11 +225,11 @@ class OpenAIService:
             return "기타"
 
         category_keywords = {
-            "맨몸": ["맨몸", "바디웨이트", "bodyweight", "체중", "무도구"],
-            "의자": ["의자", "chair", "벤치"],
-            "짐볼": ["짐볼", "짐 볼", "gym ball", "stability ball", "피트니스 볼"],
-            "폼롤러": ["폼롤러", "foam roller", "foam-roller", "마사지 롤러", "스트레칭 롤러"],
-            "탄력밴드": ["탄력밴드", "밴드", "band", "resistance band", "튜빙"],
+            "맨몸": ["맨몸", "바디웨이트", "체중", "무도구"],
+            "의자": ["의자"],
+            "짐볼": ["짐볼", "짐 볼"],
+            "폼롤러": ["폼롤러", "마사지 롤러", "스트레칭 롤러"],
+            "탄력밴드": ["탄력밴드", "밴드"],
         }
 
         for category, keywords in category_keywords.items():
@@ -302,6 +312,22 @@ class OpenAIService:
             "tool_names": unique_tools,
             "preferred_tool_category": preferred_tool_category,
         }
+
+    def _is_target_group_allowed(
+        self,
+        meta_group: Optional[str],
+        filters: Dict[str, Optional[Any]],
+    ) -> bool:
+        allowed = filters.get("allowed_target_groups")
+        if not allowed:
+            return True
+
+        # None이나 빈 값은 "공통"으로 취급
+        normalized_group = meta_group.strip() if isinstance(meta_group, str) else None
+        if normalized_group:
+            return normalized_group in allowed
+
+        return "공통" in allowed
 
     def _generate_diverse_queries(
         self,
@@ -1290,6 +1316,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 if ex_id is None:
                     continue
 
+                if not self._is_target_group_allowed(meta.get("target_group"), filters):
+                    continue
+
                 if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
                     continue
 
@@ -1404,6 +1433,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                         continue
 
                     if normalized_id in seen_ids:
+                        continue
+
+                    if not self._is_target_group_allowed(meta.get("target_group"), filters):
                         continue
 
                     if global_exclude_ids and not allow_reuse and normalized_id in global_exclude_ids:
