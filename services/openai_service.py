@@ -205,6 +205,42 @@ class OpenAIService:
 
         return " ".join(profile_parts).strip()
 
+    def _extract_recent_exercise_context(
+        self,
+        weekly_logs: List[Dict[str, Any]],
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        """최근 일지에 포함된 운동 정보를 추출하여 RAG 검색 시 참고"""
+        titles: List[str] = []
+
+        for log in weekly_logs:
+            exercises = log.get("exercises") or []
+            for ex in exercises:
+                if not isinstance(ex, dict):
+                    continue
+                exercise_info = ex.get("exercise", {}) or {}
+                title = exercise_info.get("title")
+                if title:
+                    normalized = title.strip()
+                    if normalized:
+                        titles.append(normalized)
+
+        unique_titles: List[str] = []
+        seen: Set[str] = set()
+        for title in titles:
+            lowered = title.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            unique_titles.append(title)
+            if len(unique_titles) >= limit:
+                break
+
+        return {
+            "titles": unique_titles,
+            "title_set": seen,
+        }
+
     def _generate_diverse_queries(
         self,
         muscle: str,
@@ -859,6 +895,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             step_start = time.time()
             profile_data = self._clean_user_profile(user_profile)
             prompt, metrics = self._create_weekly_pattern_prompt(weekly_logs, profile_data)
+            recent_exercise_context = self._extract_recent_exercise_context(weekly_logs)
             print(f"[주간 패턴 분석] ✅ 프롬프트 생성 완료 ({time.time() - step_start:.2f}초)")
             
             if not self.exercise_rag:
@@ -1026,6 +1063,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                         daily_details,
                         profile_data,
                         fallback_muscles=parsed_response.get("next_target_muscles"),
+                        recent_context=recent_exercise_context,
                     )
 
                 muscle_analysis = self._build_muscle_analysis_from_response(parsed_response)
@@ -1240,6 +1278,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         target_muscles: List[str],
         profile_data: Optional[Dict[str, str]] = None,
         per_day: int = 4,
+        recent_context: Optional[Dict[str, Any]] = None,
+        global_exclude_ids: Optional[Set[int]] = None,
+        allow_reuse: bool = False,
     ) -> List[Dict[str, Any]]:
         """루틴 일자별 타겟 근육을 기반으로 실제 운동 메타데이터를 검색"""
         if not self.exercise_rag or not target_muscles:
@@ -1249,6 +1290,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         profile_prefix = self._build_profile_prefix(profile_data)
         seen_ids: Set[int] = set()
         day_exercises: List[Dict[str, Any]] = []
+        recent_titles = (recent_context or {}).get("titles", []) or []
+        extra_tags: List[str] = []
+        for title in recent_titles[:3]:
+            extra_tags.append(f"{title} 대체 운동")
+            extra_tags.append(f"{title} 변형 루틴")
 
         for muscle in target_muscles:
             alias_tokens = self._expand_muscle_aliases(muscle)
@@ -1256,6 +1302,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             query_variations = self._generate_diverse_queries(
                 muscle,
                 prefix,
+                extra_tags=extra_tags,
                 max_variations=6,
             )
 
@@ -1287,6 +1334,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     if normalized_id in seen_ids:
                         continue
 
+                    if global_exclude_ids and not allow_reuse and normalized_id in global_exclude_ids:
+                        continue
+
                     if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
                         continue
 
@@ -1309,6 +1359,16 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             if len(day_exercises) >= per_day:
                 break
 
+        if not day_exercises and global_exclude_ids and not allow_reuse:
+            return self._search_day_exercises_with_rag(
+                target_muscles,
+                profile_data,
+                per_day=per_day,
+                recent_context=recent_context,
+                global_exclude_ids=global_exclude_ids,
+                allow_reuse=True,
+            )
+
         return day_exercises
 
     def _populate_daily_details_with_exercises(
@@ -1316,6 +1376,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         daily_details: List[Dict[str, Any]],
         profile_data: Optional[Dict[str, str]],
         fallback_muscles: Optional[List[str]] = None,
+        recent_context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[List[int], List[Dict[str, Any]]]:
         """LLM 루틴 일자에 RAG 운동을 매핑하고 exercise_id 목록과 RAG 정보를 반환"""
         if not daily_details:
@@ -1324,6 +1385,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         aggregated_ids: List[int] = []
         fallback_validated = validate_and_map_muscles(fallback_muscles or [])
         collected_sources: List[Dict[str, Any]] = []
+        global_used_ids: Set[int] = set()
 
         prepared_items: List[Tuple[Dict[str, Any], List[str]]] = []
         for day in daily_details:
@@ -1353,6 +1415,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 targets,
                 profile_data,
                 per_day=4,
+                recent_context=recent_context,
+                global_exclude_ids=global_used_ids,
             )
             exercise_ids: List[int] = []
 
@@ -1361,6 +1425,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 if isinstance(exercise_id, int):
                     aggregated_ids.append(exercise_id)
                     exercise_ids.append(exercise_id)
+                    global_used_ids.add(exercise_id)
                 collected_sources.append(
                     {
                         "score": exercise.get("score"),
