@@ -1474,7 +1474,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             print(f"[RAG 검색] ⚠️ 검색 실패: {exc}")
             return []
         
-        # 타겟 근육과 일치하는 운동만 필터링
+        # 타겟 근육과 일치하는 운동 필터링 (1차: 정확히 일치)
         for muscle in targets:
             alias_tokens = self._expand_muscle_aliases(muscle)
             
@@ -1512,7 +1512,165 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             if len(day_exercises) >= per_day:
                 break
         
-        print(f"[RAG 검색] ✅ 검색 완료: {len(day_exercises)}개 운동 발견")
+        # 2차: 정확히 일치하는 운동이 부족하면 관련 근육도 포함 (더 넓은 범위)
+        if len(day_exercises) < per_day:
+            print(f"[RAG 검색] ⚠️ 정확히 일치하는 운동이 부족합니다 ({len(day_exercises)}/{per_day}). 관련 근육 운동도 포함합니다.")
+            
+            # 모든 타겟 근육의 관련 근육 확장
+            all_related_muscles = set()
+            for muscle in targets:
+                all_related_muscles.update(self._expand_muscle_aliases(muscle))
+            
+            for item in rag_results:
+                if len(day_exercises) >= per_day:
+                    break
+                    
+                meta = item.get("metadata") or {}
+                exercise_id = meta.get("exercise_id")
+                if exercise_id is None:
+                    continue
+                
+                try:
+                    normalized_id = int(exercise_id)
+                except (TypeError, ValueError):
+                    continue
+                
+                if normalized_id in seen_ids:
+                    continue
+                
+                # 관련 근육과 일치하는지 확인 (더 넓은 범위)
+                exercise_muscles = meta.get("muscles", [])
+                if isinstance(exercise_muscles, str):
+                    exercise_muscles = [m.strip() for m in exercise_muscles.split(",") if m.strip()]
+                elif not isinstance(exercise_muscles, list):
+                    exercise_muscles = []
+                
+                # 운동의 근육 중 하나라도 타겟 근육과 관련이 있으면 포함
+                has_related_muscle = False
+                for ex_muscle in exercise_muscles:
+                    ex_muscle_lower = str(ex_muscle).strip().lower()
+                    for target_muscle in all_related_muscles:
+                        if target_muscle.lower() in ex_muscle_lower or ex_muscle_lower in target_muscle.lower():
+                            has_related_muscle = True
+                            break
+                    if has_related_muscle:
+                        break
+                
+                if not has_related_muscle:
+                    continue
+                
+                normalized_meta = dict(meta)
+                normalized_meta["exercise_id"] = normalized_id
+                
+                formatted = self._format_rag_exercise_payload(
+                    normalized_meta,
+                    score=item.get("score"),
+                )
+                day_exercises.append(formatted)
+                seen_ids.add(normalized_id)
+        
+        # 3차: 여전히 부족하면 더 넓은 쿼리로 재검색
+        if len(day_exercises) < per_day and targets:
+            print(f"[RAG 검색] ⚠️ 여전히 운동이 부족합니다 ({len(day_exercises)}/{per_day}). 더 넓은 범위로 재검색합니다.")
+            
+            # 더 간단한 쿼리로 재검색
+            fallback_query = f"{targets[0]} 운동"
+            if profile_data:
+                profile_prefix = self._build_profile_prefix(profile_data)
+                if profile_prefix:
+                    fallback_query = f"{profile_prefix} {fallback_query}"
+            
+            try:
+                fallback_results = self.exercise_rag.search(
+                    fallback_query,
+                    top_k=20,  # 더 많은 후보
+                    target_group_filter=filters["target_group_filter"],
+                    exclude_target_groups=filters["exclude_target_groups"],
+                    fitness_factor_filter=filters["fitness_factor_filter"],
+                    exclude_fitness_factors=filters["exclude_fitness_factors"],
+                )
+                
+                for item in fallback_results:
+                    if len(day_exercises) >= per_day:
+                        break
+                    
+                    meta = item.get("metadata") or {}
+                    exercise_id = meta.get("exercise_id")
+                    if exercise_id is None:
+                        continue
+                    
+                    try:
+                        normalized_id = int(exercise_id)
+                    except (TypeError, ValueError):
+                        continue
+                    
+                    if normalized_id in seen_ids:
+                        continue
+                    
+                    normalized_meta = dict(meta)
+                    normalized_meta["exercise_id"] = normalized_id
+                    
+                    formatted = self._format_rag_exercise_payload(
+                        normalized_meta,
+                        score=item.get("score"),
+                    )
+                    day_exercises.append(formatted)
+                    seen_ids.add(normalized_id)
+                    
+            except Exception as fallback_exc:
+                print(f"[RAG 검색] ⚠️ Fallback 검색 실패: {fallback_exc}")
+        
+        # 최종: 여전히 부족하면 타겟 근육만으로 최소한의 운동 확보
+        if len(day_exercises) == 0 and targets:
+            print(f"[RAG 검색] ⚠️ 운동이 전혀 없습니다. 최소한의 운동을 확보합니다.")
+            
+            # 가장 간단한 쿼리로 최소 1개 이상 확보
+            minimal_query = targets[0]
+            try:
+                minimal_results = self.exercise_rag.search(
+                    minimal_query,
+                    top_k=30,
+                    target_group_filter=filters["target_group_filter"],
+                    exclude_target_groups=filters["exclude_target_groups"],
+                    fitness_factor_filter=filters["fitness_factor_filter"],
+                    exclude_fitness_factors=filters["exclude_fitness_factors"],
+                )
+                
+                for item in minimal_results:
+                    if len(day_exercises) >= max(1, per_day // 2):  # 최소 1개 이상
+                        break
+                    
+                    meta = item.get("metadata") or {}
+                    exercise_id = meta.get("exercise_id")
+                    if exercise_id is None:
+                        continue
+                    
+                    try:
+                        normalized_id = int(exercise_id)
+                    except (TypeError, ValueError):
+                        continue
+                    
+                    if normalized_id in seen_ids:
+                        continue
+                    
+                    normalized_meta = dict(meta)
+                    normalized_meta["exercise_id"] = normalized_id
+                    
+                    formatted = self._format_rag_exercise_payload(
+                        normalized_meta,
+                        score=item.get("score"),
+                    )
+                    day_exercises.append(formatted)
+                    seen_ids.add(normalized_id)
+                    
+            except Exception as minimal_exc:
+                print(f"[RAG 검색] ⚠️ 최소 운동 확보 실패: {minimal_exc}")
+        
+        print(f"[RAG 검색] ✅ 검색 완료: {len(day_exercises)}개 운동 발견 (목표: {per_day}개)")
+        
+        if len(day_exercises) == 0:
+            print(f"[RAG 검색] ❌ 경고: 운동을 찾을 수 없습니다. 타겟 근육: {targets}")
+        
         return day_exercises
 
     def _build_enhanced_rag_query(
@@ -1679,8 +1837,15 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
         for day, targets, rag_query in prepared_items:
             if not targets:
-                day["exercises"] = []
-                continue
+                # 타겟 근육이 없으면 fallback 근육 사용
+                if fallback_validated:
+                    targets = fallback_validated[:]
+                    day["target_muscles"] = targets
+                    print(f"[루틴 생성] ⚠️ Day {day.get('day', '?')}에 타겟 근육이 없어서 fallback 근육 사용: {targets}")
+                else:
+                    day["exercises"] = []
+                    print(f"[루틴 생성] ⚠️ Day {day.get('day', '?')}에 타겟 근육이 없고 fallback도 없어서 운동 없음")
+                    continue
 
             # LLM이 생성한 RAG 쿼리 사용 (검증 후)
             day_exercises = self._search_day_exercises_with_llm_query(
@@ -1704,6 +1869,35 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     }
                 )
 
+            # 운동이 없으면 재시도 (더 넓은 범위로)
+            if not exercise_ids:
+                print(f"[루틴 생성] ⚠️ Day {day.get('day', '?')}에 운동이 없습니다. 재검색합니다.")
+                # 더 간단한 쿼리로 재검색
+                simple_query = f"{targets[0]} 운동" if targets else None
+                retry_exercises = self._search_day_exercises_with_llm_query(
+                    targets=targets,
+                    rag_query=simple_query,
+                    profile_data=profile_data,
+                    per_day=4,
+                    exercise_diversity=exercise_diversity,
+                )
+                
+                for exercise in retry_exercises:
+                    exercise_id = exercise.get("exercise_id")
+                    if isinstance(exercise_id, int) and exercise_id not in exercise_ids:
+                        aggregated_ids.append(exercise_id)
+                        exercise_ids.append(exercise_id)
+                        collected_sources.append(
+                            {
+                                "score": exercise.get("score"),
+                                "metadata": exercise,
+                            }
+                        )
+            
+            # 최종적으로도 운동이 없으면 경고
+            if not exercise_ids:
+                print(f"[루틴 생성] ❌ Day {day.get('day', '?')}에 여전히 운동이 없습니다. 타겟 근육: {targets}")
+            
             day["exercises"] = exercise_ids
 
         return aggregated_ids, collected_sources
