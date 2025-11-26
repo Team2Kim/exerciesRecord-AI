@@ -850,7 +850,14 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             "recent_exercises": ["최근 수행한 운동명1", "최근 수행한 운동명2"],
             "exercise_variety_score": "운동 다양성 점수 (0-100)",
             "repetition_pattern": "반복되는 운동 패턴 설명",
-            "recommended_variation": "운동 다양성을 위한 구체적인 제안"
+            "recommended_variation": "운동 다양성을 위한 구체적인 제안",
+            "preferred_equipment": ["사용자가 선호하는 운동 도구1", "도구2"],
+            "equipment_usage_pattern": "사용자가 주로 사용하는 운동 도구 패턴 설명",
+            "performance_analysis": {{
+                "current_level": "운동 메모(중량, 반복, 세트)를 분석한 현재 운동 수준 평가",
+                "progression_trend": "운동 메모를 통해 파악한 진행 추세 (향상/유지/하락)",
+                "recommended_progression": "운동 메모 기반 다음 단계 추천 (중량 증가, 반복 증가, 세트 증가 등)"
+            }}
         }},
         "recovery_status": {{
             "fatigue_level": "피로도 수준 (낮음/보통/높음)",
@@ -915,10 +922,17 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
   1. 사용자 프로필 정보 (대상 연령대, 운동 수준, 운동 목적)
   2. 해당 날짜의 target_muscles (타겟 근육명)
   3. pattern_analysis.exercise_diversity.recommended_variation (운동 다양성 제안)
-  4. pattern_analysis.recovery_status (회복 상태 및 권장 강도)
-  5. pattern_analysis.muscle_balance (부족한 근육/과사용 근육 정보)
-- 쿼리는 자연어로 작성하되, 핵심 키워드(근육명, 운동 목적, 강도 등)를 포함하세요.
-- 예시: "성인 중급 근력 큰가슴근 강화 운동 다양한 변형" 또는 "가벼운 회복 위팔세갈래근 스트레칭"
+  4. pattern_analysis.exercise_diversity.preferred_equipment (사용자가 선호하는 운동 도구 - 매우 중요!)
+  5. pattern_analysis.exercise_diversity.equipment_usage_pattern (운동 도구 사용 패턴)
+  6. pattern_analysis.exercise_diversity.performance_analysis (운동 수행 수준 분석 - 중량, 반복, 세트 정보 반영)
+  7. pattern_analysis.recovery_status (회복 상태 및 권장 강도)
+  8. pattern_analysis.muscle_balance (부족한 근육/과사용 근육 정보)
+- ⚠️ 매우 중요: 사용자가 주간 일지에서 주로 사용한 운동 도구(머신, 덤벨, 바벨, 케이블, 기구 등)를 반드시 쿼리에 포함하세요.
+- 사용자가 머신이나 기구를 사용했다면 "머신", "기구", "덤벨" 등의 키워드를 쿼리에 포함하세요.
+- 체중 운동만 사용했다면 "체중" 키워드를 포함하되, 사용자가 기구를 사용했다면 기구 관련 키워드를 우선하세요.
+- ⚠️ 운동 수행 수준 반영: performance_analysis의 current_level과 recommended_progression을 고려하여 적절한 난이도와 강도의 운동을 검색하도록 쿼리를 작성하세요.
+- 쿼리는 자연어로 작성하되, 핵심 키워드(근육명, 운동 목적, 강도, 운동 도구 등)를 포함하세요.
+- 예시: "성인 중급 근력 머신 큰가슴근 강화 운동" 또는 "덤벨 기구 위팔세갈래근 운동" 또는 "케이블 어깨세모근 운동"
 - 쿼리 길이는 10-50자 정도로 적절하게 작성하세요.
 - MUSCLE_LABELS에 포함된 정확한 근육명을 사용하세요.
 
@@ -928,6 +942,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 - exercise_variety_score는 운동 다양성을 0-100 점수로 평가하세요 (같은 운동 반복이 많으면 낮은 점수).
 - repetition_pattern에는 반복되는 운동 패턴을 구체적으로 설명하세요.
 - recommended_variation에는 운동 다양성을 높이기 위한 구체적인 제안을 작성하세요.
+- pattern_analysis.exercise_diversity.preferred_equipment에는 사용자가 주간 일지에서 주로 사용한 운동 도구를 나열하세요 (예: "머신", "덤벨", "바벨", "케이블", "기구" 등).
+- pattern_analysis.exercise_diversity.equipment_usage_pattern에는 사용자의 운동 도구 사용 패턴을 설명하세요 (예: "주로 머신과 기구를 사용", "체중 운동 위주" 등).
+- ⚠️ 매우 중요 - 운동 수행 수준 분석 (performance_analysis):
+  * pattern_analysis.exercise_diversity.performance_analysis.current_level: 운동 메모(exerciseMemo)에 기록된 중량, 반복 횟수, 세트 수, 시간 등을 종합 분석하여 사용자의 현재 운동 수준을 평가하세요 (예: "중급 수준, 벤치프레스 60kg 3세트 10회 수행")
+  * pattern_analysis.exercise_diversity.performance_analysis.progression_trend: 운동 메모를 통해 파악한 진행 추세를 분석하세요 (향상/유지/하락, 중량이나 반복이 증가했는지 등)
+  * pattern_analysis.exercise_diversity.performance_analysis.recommended_progression: 운동 메모 기반으로 다음 단계를 구체적으로 추천하세요 (예: "중량 5kg 증가", "반복 횟수 2회 증가", "세트 1개 추가" 등)
 
 ⚠️ 매우 중요 - 회복 상태 분석:
 - recovery_status.fatigue_level은 주간 운동 강도와 빈도를 종합하여 평가하세요.
@@ -1010,6 +1030,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
                 day_level_exercise_ids = []
                 if daily_details:
+                    # LLM 분석 결과에서 운동 다양성 정보 추출 (운동 도구 정보 포함)
+                    pattern_analysis = parsed_response.get("pattern_analysis", {})
+                    exercise_diversity = pattern_analysis.get("exercise_diversity", {})
+                    
                     (
                         day_level_exercise_ids,
                         rag_candidates,
@@ -1017,6 +1041,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                         daily_details,
                         profile_data,
                         fallback_muscles=parsed_response.get("next_target_muscles"),
+                        exercise_diversity=exercise_diversity,
                     )
 
                 muscle_analysis = self._build_muscle_analysis_from_response(parsed_response)
@@ -1313,14 +1338,16 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         query: Optional[str],
         target_muscles: List[str],
         profile_data: Optional[Dict[str, str]] = None,
+        exercise_diversity: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, str]:
         """
-        LLM이 생성한 RAG 쿼리를 검증합니다.
+        LLM이 생성한 RAG 쿼리를 검증하고 개선합니다.
         
         Args:
             query: 검증할 쿼리 문자열
             target_muscles: 타겟 근육 목록
             profile_data: 사용자 프로필 데이터
+            exercise_diversity: 운동 다양성 분석 결과 (운동 도구 정보 포함)
             
         Returns:
             (is_valid, validated_query) 튜플
@@ -1339,8 +1366,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             query = query[:200].strip()
             print(f"[RAG 쿼리 검증] ⚠️ 쿼리가 너무 길어서 잘랐습니다: {len(query)}자")
         
-        # 2. 타겟 근육명이 포함되어 있는지 확인
         query_lower = query.lower()
+        
+        # 2. 타겟 근육명이 포함되어 있는지 확인
         has_target_muscle = False
         for muscle in target_muscles:
             if muscle.lower() in query_lower:
@@ -1352,14 +1380,32 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             primary_muscle = target_muscles[0]
             query = f"{query} {primary_muscle}".strip()
             print(f"[RAG 쿼리 검증] ⚠️ 타겟 근육명이 없어서 추가했습니다: {primary_muscle}")
+            query_lower = query.lower()
         
-        # 3. 근육명이 MUSCLE_LABELS에 있는지 확인하고 수정
+        # 3. 운동 도구 정보 확인 및 추가 (매우 중요!)
+        if exercise_diversity:
+            preferred_equipment = exercise_diversity.get("preferred_equipment", [])
+            if preferred_equipment and isinstance(preferred_equipment, list):
+                # 쿼리에 운동 도구 키워드가 있는지 확인
+                equipment_keywords = ["머신", "기구", "덤벨", "바벨", "케이블", "스미스", "레그", "프레스", "체중", "매트"]
+                has_equipment = any(keyword in query_lower for keyword in equipment_keywords)
+                
+                if not has_equipment and preferred_equipment:
+                    # 사용자가 선호하는 운동 도구를 쿼리에 추가
+                    # 가장 많이 사용한 도구를 우선적으로 추가
+                    primary_equipment = preferred_equipment[0] if preferred_equipment else ""
+                    if primary_equipment:
+                        query = f"{query} {primary_equipment}".strip()
+                        print(f"[RAG 쿼리 검증] ✅ 운동 도구 정보 추가: {primary_equipment}")
+                        query_lower = query.lower()
+        
+        # 4. 근육명이 MUSCLE_LABELS에 있는지 확인하고 수정
         validated_muscles_in_query = []
         for muscle in MUSCLE_LABELS:
             if muscle.lower() in query_lower:
                 validated_muscles_in_query.append(muscle)
         
-        # 4. 기본 키워드 확인 (운동 관련 키워드가 없으면 추가)
+        # 5. 기본 키워드 확인 (운동 관련 키워드가 없으면 추가)
         exercise_keywords = ["운동", "강화", "개발", "훈련", "트레이닝", "스트레칭", "회복"]
         has_exercise_keyword = any(keyword in query_lower for keyword in exercise_keywords)
         if not has_exercise_keyword:
@@ -1374,6 +1420,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         rag_query: Optional[str],
         profile_data: Optional[Dict[str, str]] = None,
         per_day: int = 4,
+        exercise_diversity: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
         LLM이 생성한 RAG 쿼리를 사용하여 운동을 검색합니다.
@@ -1394,8 +1441,16 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         seen_ids: Set[int] = set()
         day_exercises: List[Dict[str, Any]] = []
         
-        # RAG 쿼리 검증
-        is_valid, validated_query = self._validate_rag_query(rag_query, targets, profile_data)
+        # LLM이 생성한 원본 쿼리 로그
+        if rag_query:
+            print(f"[RAG 검색] 📝 LLM 생성 원본 쿼리: {rag_query}")
+        else:
+            print(f"[RAG 검색] ⚠️ LLM이 쿼리를 생성하지 않았습니다")
+        
+        # RAG 쿼리 검증 (운동 도구 정보 포함)
+        is_valid, validated_query = self._validate_rag_query(
+            rag_query, targets, profile_data, exercise_diversity=exercise_diversity
+        )
         
         if not is_valid or not validated_query:
             # 쿼리가 유효하지 않으면 기본 쿼리 생성
@@ -1403,7 +1458,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             profile_prefix = self._build_profile_prefix(profile_data)
             validated_query = f"{profile_prefix} {targets[0]} 운동".strip() if profile_prefix else f"{targets[0]} 운동"
         
-        print(f"[RAG 검색] 🔍 검색 쿼리: {validated_query}")
+        print(f"[RAG 검색] 🔍 검증된 검색 쿼리: {validated_query}")
         
         try:
             top_k = 12  # 충분한 후보 확보
@@ -1589,6 +1644,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         daily_details: List[Dict[str, Any]],
         profile_data: Optional[Dict[str, str]],
         fallback_muscles: Optional[List[str]] = None,
+        exercise_diversity: Optional[Dict[str, Any]] = None,
     ) -> Tuple[List[int], List[Dict[str, Any]]]:
         """LLM 루틴 일자에 RAG 운동을 매핑하고 exercise_id 목록과 RAG 정보를 반환"""
         if not daily_details:
@@ -1632,6 +1688,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 rag_query=rag_query,
                 profile_data=profile_data,
                 per_day=4,
+                exercise_diversity=exercise_diversity,
             )
             exercise_ids: List[int] = []
 
@@ -1905,6 +1962,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         intensity_counts: Dict[str, int] = {"상": 0, "중": 0, "하": 0}
         body_part_counts: Dict[str, int] = {}
         muscle_counts: Dict[str, int] = {}
+        equipment_counts: Dict[str, int] = {}  # 운동 도구 사용 횟수
         total_minutes = 0
         active_days = 0
 
@@ -1937,10 +1995,20 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
                 for muscle in exercise_info.get("muscles", []):
                     muscle_counts[muscle] = muscle_counts.get(muscle, 0) + 1
+                
+                # 운동 도구 정보 수집
+                exercise_tool = exercise_info.get("exerciseTool", "")
+                if exercise_tool and exercise_tool.strip() and exercise_tool != "정보 없음":
+                    equipment_counts[exercise_tool] = equipment_counts.get(exercise_tool, 0) + 1
 
         top_muscles = [
             {"name": name, "count": count}
             for name, count in sorted(muscle_counts.items(), key=lambda item: item[1], reverse=True)
+        ]
+        
+        top_equipment = [
+            {"name": name, "count": count}
+            for name, count in sorted(equipment_counts.items(), key=lambda item: item[1], reverse=True)
         ]
 
         # 주간 분석이므로 총 일수는 항상 7일로 고정
@@ -1952,7 +2020,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             "total_minutes": total_minutes,
             "intensity_counts": intensity_counts,
             "body_part_counts": body_part_counts,
-            "top_muscles": top_muscles
+            "top_muscles": top_muscles,
+            "top_equipment": top_equipment  # 운동 도구 정보 추가
         }
 
     def _infer_body_part(self, exercise_info: Dict[str, Any]) -> str:
@@ -2016,6 +2085,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         top_muscle_summary = ", ".join(
             f"{entry['name']} {entry['count']}회" for entry in metrics.get("top_muscles", [])[:6]
         ) if metrics.get("top_muscles") else "데이터 없음"
+        
+        top_equipment_summary = ", ".join(
+            f"{entry['name']} {entry['count']}회" for entry in metrics.get("top_equipment", [])[:6]
+        ) if metrics.get("top_equipment") else "데이터 없음"
 
         prompt = f"""
 사용자의 최근 7일 운동 기록을 분석하고, 패턴을 파악해 적절한 루틴을 제안해주세요.
@@ -2044,7 +2117,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                         exercise = ex_data.get("exercise", {})
                         muscles_list = exercise.get('muscles', [])
                         muscles_text = ', '.join(muscles_list) if muscles_list else '정보 없음'
-                        prompt += f"- 운동 {ex_idx}: {exercise.get('title', '운동명 없음')} | 사용 근육: {muscles_text} | 강도: {ex_data.get('intensity', '정보 없음')} | 시간: {ex_data.get('exerciseTime', 0)}분 | 도구: {exercise.get('exerciseTool', '정보 없음')}\n"
+                        exercise_tool = exercise.get('exerciseTool', '정보 없음')
+                        # 운동별 메모 (중량, 반복 횟수, 세트 수, 시간 등)
+                        exercise_memo = ex_data.get('exerciseMemo', '') or ex_data.get('memo', '')
+                        exercise_memo_text = f" | 운동 메모: {exercise_memo}" if exercise_memo and exercise_memo.strip() else ""
+                        # 운동 도구 정보를 명확히 표시
+                        prompt += f"- 운동 {ex_idx}: {exercise.get('title', '운동명 없음')} | 사용 근육: {muscles_text} | 강도: {ex_data.get('intensity', '정보 없음')} | 시간: {ex_data.get('exerciseTime', 0)}분 | 도구: {exercise_tool}{exercise_memo_text} (⚠️ 도구 정보와 운동 메모(중량, 반복, 세트 등)를 반드시 분석에 반영하세요)\n"
 
         prompt += f"""
 
@@ -2054,6 +2132,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 - 강도 분포: {intensity_summary}
 - 주요 운동 부위: {body_part_summary}
 - 상위 근육 사용: {top_muscle_summary}
+- 주요 사용 운동 도구: {top_equipment_summary} (⚠️ 이 정보를 반드시 분석에 반영하세요)
 - 휴식일 수: {metrics['rest_days']}일
 
 [분석 및 추천 지침]
@@ -2064,6 +2143,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
    - 같은 운동이 반복되는 패턴을 분석하세요
    - 운동 다양성 점수를 평가하고 (같은 운동 반복이 많으면 낮은 점수)
    - 운동 다양성을 높이기 위한 구체적인 제안을 작성하세요
+   - ⚠️ 운동별 메모(exerciseMemo)에 기록된 중량, 반복 횟수, 세트 수, 시간 등의 정보를 분석하여 사용자의 운동 진행 수준과 강도를 파악하세요
+   - 운동 메모의 중량/반복 정보를 바탕으로 사용자의 현재 운동 능력을 평가하고, 적절한 다음 단계 운동을 추천하세요
 4. ⚠️ 매우 중요 - 회복 상태 평가:
    - 주간 운동 강도와 빈도를 종합하여 피로도 수준을 평가하세요
    - 회복이 필요한 부위나 근육을 구체적으로 나열하세요
