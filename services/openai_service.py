@@ -845,7 +845,18 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             "underworked": ["근육명3", "근육명4"],
             "comments": "근육 사용 균형에 대한 종합 의견"
         }},
-        "habit_observation": "생활 패턴 및 회복 습관 관련 인사이트"
+        "habit_observation": "생활 패턴 및 회복 습관 관련 인사이트",
+        "exercise_diversity": {{
+            "recent_exercises": ["최근 수행한 운동명1", "최근 수행한 운동명2"],
+            "exercise_variety_score": "운동 다양성 점수 (0-100)",
+            "repetition_pattern": "반복되는 운동 패턴 설명",
+            "recommended_variation": "운동 다양성을 위한 구체적인 제안"
+        }},
+        "recovery_status": {{
+            "fatigue_level": "피로도 수준 (낮음/보통/높음)",
+            "recovery_needs": "회복이 필요한 부위나 근육",
+            "suggested_intensity": "다음 주 권장 강도 (낮음/보통/높음)"
+        }}
     }},
     "recommended_routine": {{
         "weekly_overview": [
@@ -856,7 +867,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             {{
                 "day": 1,
                 "focus": "주요 부위 및 목표",
-                    "target_muscles": ["근육명1", "근육명2"],
+                "target_muscles": ["근육명1", "근육명2"],
+                "rag_query": "이 날짜에 적합한 운동을 검색하기 위한 RAG 쿼리 (사용자 프로필, 타겟 근육, 운동 다양성, 회복 상태를 종합한 검색어)",
                 "exercises": [],
                 "estimated_duration": "예상 소요 시간"
             }}
@@ -895,7 +907,32 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 - 반드시 최소 3일 이상의 daily_details를 작성하세요.
 - daily_details[].target_muscles 필드는 MUSCLE_LABELS에 포함된 명칭 2~4개로 작성하세요.
 - daily_details[].exercises[] 필드는 빈 배열로 두세요. 이후 시스템이 RAG 검색 결과로 채웁니다.
-- 각 day의 focus와 estimated_duration은 작성하되, 구체적인 운동 목록은 포함하지 마세요."""
+- 각 day의 focus와 estimated_duration은 작성하되, 구체적인 운동 목록은 포함하지 마세요.
+
+⚠️ 매우 중요 - RAG 검색 쿼리 생성:
+- daily_details[].rag_query 필드에 각 날짜에 적합한 운동을 검색하기 위한 쿼리를 작성하세요.
+- 쿼리는 다음 정보를 종합하여 작성하세요:
+  1. 사용자 프로필 정보 (대상 연령대, 운동 수준, 운동 목적)
+  2. 해당 날짜의 target_muscles (타겟 근육명)
+  3. pattern_analysis.exercise_diversity.recommended_variation (운동 다양성 제안)
+  4. pattern_analysis.recovery_status (회복 상태 및 권장 강도)
+  5. pattern_analysis.muscle_balance (부족한 근육/과사용 근육 정보)
+- 쿼리는 자연어로 작성하되, 핵심 키워드(근육명, 운동 목적, 강도 등)를 포함하세요.
+- 예시: "성인 중급 근력 큰가슴근 강화 운동 다양한 변형" 또는 "가벼운 회복 위팔세갈래근 스트레칭"
+- 쿼리 길이는 10-50자 정도로 적절하게 작성하세요.
+- MUSCLE_LABELS에 포함된 정확한 근육명을 사용하세요.
+
+⚠️ 매우 중요 - 운동 다양성 분석:
+- pattern_analysis.exercise_diversity.recent_exercises에는 최근 7일간 수행한 모든 운동명을 정확히 나열하세요.
+- 운동명은 정확한 제목(title)을 사용하세요 (예: "푸시업", "트라이셉스 딥", "런지 위드 레이즈").
+- exercise_variety_score는 운동 다양성을 0-100 점수로 평가하세요 (같은 운동 반복이 많으면 낮은 점수).
+- repetition_pattern에는 반복되는 운동 패턴을 구체적으로 설명하세요.
+- recommended_variation에는 운동 다양성을 높이기 위한 구체적인 제안을 작성하세요.
+
+⚠️ 매우 중요 - 회복 상태 분석:
+- recovery_status.fatigue_level은 주간 운동 강도와 빈도를 종합하여 평가하세요.
+- recovery_status.recovery_needs에는 회복이 필요한 부위나 근육을 구체적으로 나열하세요.
+- recovery_status.suggested_intensity는 다음 주 권장 강도를 제시하세요."""
                     },
                     {
                         "role": "user",
@@ -1194,6 +1231,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         target_muscles: List[str],
         profile_data: Optional[Dict[str, str]] = None,
         per_day: int = 4,
+        exercise_diversity: Optional[Dict[str, Any]] = None,
+        recovery_status: Optional[Dict[str, Any]] = None,
+        underworked_muscles: Optional[List[str]] = None,
+        overworked_muscles: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """루틴 일자별 타겟 근육을 기반으로 실제 운동 메타데이터를 검색"""
         if not self.exercise_rag or not target_muscles:
@@ -1206,12 +1247,23 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
         for muscle in target_muscles:
             alias_tokens = self._expand_muscle_aliases(muscle)
-            prefix = f"{profile_prefix} " if profile_prefix else ""
-            query = f"{prefix}{muscle} 운동 루틴".strip()
+            
+            # RAG 검색 쿼리 생성: 사용자 정보 + 주간 분석 결과 결합
+            query = self._build_enhanced_rag_query(
+                muscle=muscle,
+                profile_prefix=profile_prefix,
+                exercise_diversity=exercise_diversity,
+                recovery_status=recovery_status,
+                target_muscles=target_muscles,
+                underworked_muscles=underworked_muscles,
+                overworked_muscles=overworked_muscles,
+            )
+            
             try:
+                top_k = 8  # 충분한 후보 확보
                 rag_results = self.exercise_rag.search(
                     query,
-                    top_k=6,
+                    top_k=top_k,
                     target_group_filter=filters["target_group_filter"],
                     exclude_target_groups=filters["exclude_target_groups"],
                     fitness_factor_filter=filters["fitness_factor_filter"],
@@ -1256,6 +1308,282 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 
         return day_exercises
 
+    def _validate_rag_query(
+        self,
+        query: Optional[str],
+        target_muscles: List[str],
+        profile_data: Optional[Dict[str, str]] = None,
+    ) -> Tuple[bool, str]:
+        """
+        LLM이 생성한 RAG 쿼리를 검증합니다.
+        
+        Args:
+            query: 검증할 쿼리 문자열
+            target_muscles: 타겟 근육 목록
+            profile_data: 사용자 프로필 데이터
+            
+        Returns:
+            (is_valid, validated_query) 튜플
+            - is_valid: 쿼리가 유효한지 여부
+            - validated_query: 검증/수정된 쿼리
+        """
+        if not query or not isinstance(query, str):
+            return False, ""
+        
+        query = query.strip()
+        
+        # 1. 길이 검증 (너무 짧거나 길면 수정)
+        if len(query) < 3:
+            return False, ""
+        if len(query) > 200:
+            query = query[:200].strip()
+            print(f"[RAG 쿼리 검증] ⚠️ 쿼리가 너무 길어서 잘랐습니다: {len(query)}자")
+        
+        # 2. 타겟 근육명이 포함되어 있는지 확인
+        query_lower = query.lower()
+        has_target_muscle = False
+        for muscle in target_muscles:
+            if muscle.lower() in query_lower:
+                has_target_muscle = True
+                break
+        
+        # 타겟 근육이 없으면 추가
+        if not has_target_muscle and target_muscles:
+            primary_muscle = target_muscles[0]
+            query = f"{query} {primary_muscle}".strip()
+            print(f"[RAG 쿼리 검증] ⚠️ 타겟 근육명이 없어서 추가했습니다: {primary_muscle}")
+        
+        # 3. 근육명이 MUSCLE_LABELS에 있는지 확인하고 수정
+        validated_muscles_in_query = []
+        for muscle in MUSCLE_LABELS:
+            if muscle.lower() in query_lower:
+                validated_muscles_in_query.append(muscle)
+        
+        # 4. 기본 키워드 확인 (운동 관련 키워드가 없으면 추가)
+        exercise_keywords = ["운동", "강화", "개발", "훈련", "트레이닝", "스트레칭", "회복"]
+        has_exercise_keyword = any(keyword in query_lower for keyword in exercise_keywords)
+        if not has_exercise_keyword:
+            query = f"{query} 운동".strip()
+            print(f"[RAG 쿼리 검증] ⚠️ 운동 관련 키워드가 없어서 추가했습니다")
+        
+        return True, query
+
+    def _search_day_exercises_with_llm_query(
+        self,
+        targets: List[str],
+        rag_query: Optional[str],
+        profile_data: Optional[Dict[str, str]] = None,
+        per_day: int = 4,
+    ) -> List[Dict[str, Any]]:
+        """
+        LLM이 생성한 RAG 쿼리를 사용하여 운동을 검색합니다.
+        
+        Args:
+            targets: 타겟 근육 목록
+            rag_query: LLM이 생성한 RAG 쿼리
+            profile_data: 사용자 프로필 데이터
+            per_day: 하루당 추천 운동 수
+            
+        Returns:
+            검색된 운동 목록
+        """
+        if not self.exercise_rag or not targets:
+            return []
+        
+        filters = self._build_rag_filter_options(profile_data)
+        seen_ids: Set[int] = set()
+        day_exercises: List[Dict[str, Any]] = []
+        
+        # RAG 쿼리 검증
+        is_valid, validated_query = self._validate_rag_query(rag_query, targets, profile_data)
+        
+        if not is_valid or not validated_query:
+            # 쿼리가 유효하지 않으면 기본 쿼리 생성
+            print(f"[RAG 검색] ⚠️ LLM 쿼리가 유효하지 않아 기본 쿼리로 대체합니다")
+            profile_prefix = self._build_profile_prefix(profile_data)
+            validated_query = f"{profile_prefix} {targets[0]} 운동".strip() if profile_prefix else f"{targets[0]} 운동"
+        
+        print(f"[RAG 검색] 🔍 검색 쿼리: {validated_query}")
+        
+        try:
+            top_k = 12  # 충분한 후보 확보
+            rag_results = self.exercise_rag.search(
+                validated_query,
+                top_k=top_k,
+                target_group_filter=filters["target_group_filter"],
+                exclude_target_groups=filters["exclude_target_groups"],
+                fitness_factor_filter=filters["fitness_factor_filter"],
+                exclude_fitness_factors=filters["exclude_fitness_factors"],
+            )
+        except Exception as exc:
+            print(f"[RAG 검색] ⚠️ 검색 실패: {exc}")
+            return []
+        
+        # 타겟 근육과 일치하는 운동만 필터링
+        for muscle in targets:
+            alias_tokens = self._expand_muscle_aliases(muscle)
+            
+            for item in rag_results:
+                meta = item.get("metadata") or {}
+                exercise_id = meta.get("exercise_id")
+                if exercise_id is None:
+                    continue
+                
+                try:
+                    normalized_id = int(exercise_id)
+                except (TypeError, ValueError):
+                    continue
+                
+                if normalized_id in seen_ids:
+                    continue
+                
+                # 타겟 근육과 일치하는지 확인
+                if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
+                    continue
+                
+                normalized_meta = dict(meta)
+                normalized_meta["exercise_id"] = normalized_id
+                
+                formatted = self._format_rag_exercise_payload(
+                    normalized_meta,
+                    score=item.get("score"),
+                )
+                day_exercises.append(formatted)
+                seen_ids.add(normalized_id)
+                
+                if len(day_exercises) >= per_day:
+                    break
+            
+            if len(day_exercises) >= per_day:
+                break
+        
+        print(f"[RAG 검색] ✅ 검색 완료: {len(day_exercises)}개 운동 발견")
+        return day_exercises
+
+    def _build_enhanced_rag_query(
+        self,
+        muscle: str,
+        profile_prefix: str,
+        exercise_diversity: Optional[Dict[str, Any]] = None,
+        recovery_status: Optional[Dict[str, Any]] = None,
+        target_muscles: Optional[List[str]] = None,
+        underworked_muscles: Optional[List[str]] = None,
+        overworked_muscles: Optional[List[str]] = None,
+    ) -> str:
+        """
+        LLM 분석 결과를 반영한 향상된 RAG 검색 쿼리 생성
+        
+        사용자 정보와 주간 분석 결과를 결합하여 더 정확한 운동 검색을 수행합니다.
+        
+        Args:
+            muscle: 타겟 근육명
+            profile_prefix: 사용자 프로필 정보 (대상 연령대, 운동 수준, 운동 목적)
+            exercise_diversity: 운동 다양성 분석 결과
+            recovery_status: 회복 상태 분석 결과
+            target_muscles: 전체 타겟 근육 목록
+            underworked_muscles: LLM이 분석한 부족한 근육 목록
+            overworked_muscles: LLM이 분석한 과사용 근육 목록
+            
+        Returns:
+            RAG 검색에 사용할 쿼리 문자열
+        """
+        query_parts = []
+        
+        # 1. 사용자 프로필 정보 포함
+        if profile_prefix:
+            query_parts.append(profile_prefix)
+        
+        # 2. 타겟 근육명 (핵심)
+        query_parts.append(muscle)
+        
+        # 3. 부족한 근육 강조 - LLM 분석 결과 활용
+        if underworked_muscles and muscle in underworked_muscles:
+            query_parts.append("강화")
+            query_parts.append("개발")
+            # 부족한 근육은 더 집중적으로 검색
+            print(f"[RAG 쿼리] 부족한 근육 감지: {muscle} - 강화 운동 검색")
+        
+        # 4. 과사용 근육 회피 (해당 근육이면 가벼운 운동 검색)
+        if overworked_muscles and muscle in overworked_muscles:
+            query_parts.append("가벼운")
+            query_parts.append("회복")
+            print(f"[RAG 쿼리] 과사용 근육 감지: {muscle} - 가벼운 회복 운동 검색")
+        
+        # 5. 운동 다양성 정보 반영
+        if exercise_diversity:
+            recommended_variation = exercise_diversity.get("recommended_variation", "")
+            if recommended_variation:
+                # 다양성 제안에서 키워드 추출
+                if "다양한" in recommended_variation or "변화" in recommended_variation:
+                    query_parts.append("다양한")
+                if "새로운" in recommended_variation or "다른" in recommended_variation:
+                    query_parts.append("새로운")
+                if "변형" in recommended_variation:
+                    query_parts.append("변형")
+        
+        # 6. 회복 상태에 따른 강도 조절
+        if recovery_status:
+            suggested_intensity = recovery_status.get("suggested_intensity", "")
+            fatigue_level = recovery_status.get("fatigue_level", "")
+            
+            if "낮음" in suggested_intensity or "낮은" in suggested_intensity or "낮음" in fatigue_level:
+                query_parts.append("가벼운")
+            elif "높음" in suggested_intensity or "높은" in suggested_intensity:
+                query_parts.append("강도 높은")
+            
+            recovery_needs = recovery_status.get("recovery_needs", "")
+            if recovery_needs and muscle in recovery_needs:
+                query_parts.append("회복")
+        
+        # 7. 기본 운동 타입 명시
+        query_parts.append("운동")
+        
+        query = " ".join([p for p in query_parts if p]).strip()
+        
+        # 최소한의 쿼리 보장
+        if not query or len(query) < 3:
+            query = f"{muscle} 운동"
+        
+        print(f"[RAG 쿼리] 생성된 쿼리: {query}")
+        return query
+
+    def _extract_recent_exercises(self, weekly_logs: List[Dict[str, Any]]) -> List[str]:
+        """주간 일지에서 최근 수행한 운동명 목록을 추출"""
+        recent_exercises = []
+        
+        for log in weekly_logs:
+            exercises = log.get("exercises", [])
+            if not isinstance(exercises, list):
+                continue
+            
+            for ex_data in exercises:
+                if not isinstance(ex_data, dict):
+                    continue
+                
+                exercise = ex_data.get("exercise", {})
+                if not isinstance(exercise, dict):
+                    continue
+                
+                # title과 standard_title 모두 수집
+                title = exercise.get("title", "").strip()
+                standard_title = exercise.get("standard_title", "").strip()
+                
+                if title:
+                    recent_exercises.append(title)
+                if standard_title and standard_title != title:
+                    recent_exercises.append(standard_title)
+        
+        # 중복 제거 및 정규화
+        unique_exercises = []
+        seen = set()
+        for ex_name in recent_exercises:
+            normalized = ex_name.strip().lower()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                unique_exercises.append(ex_name.strip())  # 원본 형태 유지
+        
+        return unique_exercises
+
     def _populate_daily_details_with_exercises(
         self,
         daily_details: List[Dict[str, Any]],
@@ -1270,7 +1598,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         fallback_validated = validate_and_map_muscles(fallback_muscles or [])
         collected_sources: List[Dict[str, Any]] = []
 
-        prepared_items: List[Tuple[Dict[str, Any], List[str]]] = []
+        prepared_items: List[Tuple[Dict[str, Any], List[str], Optional[str]]] = []
         for day in daily_details:
             if not isinstance(day, dict):
                 continue
@@ -1284,19 +1612,25 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 validated_targets = fallback_validated[:]
 
             day["target_muscles"] = validated_targets
-            prepared_items.append((day, validated_targets))
+            
+            # LLM이 생성한 RAG 쿼리 가져오기
+            rag_query = day.get("rag_query", "").strip() if isinstance(day.get("rag_query"), str) else None
+            
+            prepared_items.append((day, validated_targets, rag_query))
 
         if not self.exercise_rag:
             return aggregated_ids, collected_sources
 
-        for day, targets in prepared_items:
+        for day, targets, rag_query in prepared_items:
             if not targets:
                 day["exercises"] = []
                 continue
 
-            day_exercises = self._search_day_exercises_with_rag(
-                targets,
-                profile_data,
+            # LLM이 생성한 RAG 쿼리 사용 (검증 후)
+            day_exercises = self._search_day_exercises_with_llm_query(
+                targets=targets,
+                rag_query=rag_query,
+                profile_data=profile_data,
                 per_day=4,
             )
             exercise_ids: List[int] = []
@@ -1725,11 +2059,21 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 [분석 및 추천 지침]
 1. 주간 운동 빈도, 강도, 회복 상태를 종합 분석
 2. 근육 사용량의 불균형, 과사용/부족 부위를 명확히 제시
-3. 다음 주를 위한 4~6회 분할 루틴을 구성하고 휴식일 또는 액티브 리커버리 제안 포함
-4. 점진적 과부하 전략과 컨디션 조절 팁 포함
-5. 회복을 돕는 생활 습관(수면, 영양, 스트레칭) 권장 사항 제시
-6. 사용자 프로필(targetGroup, fitnessLevelName, fitnessFactorName)이 제공되면 해당 조건에 적합한 난이도/운동 종류만 우선 추천하고, 부적절한 종목은 피하세요.
-7. 반드시 최소 3일 이상의 분할을 구성하고, 각 day마다 반드시 최소 3개 이상의 각기 다른 운동을 포함하세요. 상세한 운동명, 세트, 횟수, 휴식시간까지 포함해주세요.
+3. ⚠️ 매우 중요 - 운동 다양성 분석:
+   - 최근 7일간 수행한 모든 운동명을 정확히 식별하고 나열하세요
+   - 같은 운동이 반복되는 패턴을 분석하세요
+   - 운동 다양성 점수를 평가하고 (같은 운동 반복이 많으면 낮은 점수)
+   - 운동 다양성을 높이기 위한 구체적인 제안을 작성하세요
+4. ⚠️ 매우 중요 - 회복 상태 평가:
+   - 주간 운동 강도와 빈도를 종합하여 피로도 수준을 평가하세요
+   - 회복이 필요한 부위나 근육을 구체적으로 나열하세요
+   - 다음 주 권장 강도를 제시하세요 (낮음/보통/높음)
+5. 다음 주를 위한 4~6회 분할 루틴을 구성하고 휴식일 또는 액티브 리커버리 제안 포함
+6. 점진적 과부하 전략과 컨디션 조절 팁 포함
+7. 회복을 돕는 생활 습관(수면, 영양, 스트레칭) 권장 사항 제시
+8. 사용자 프로필(targetGroup, fitnessLevelName, fitnessFactorName)이 제공되면 해당 조건에 적합한 난이도/운동 종류만 우선 추천하고, 부적절한 종목은 피하세요.
+9. 반드시 최소 3일 이상의 분할을 구성하고, 각 day마다 반드시 최소 3개 이상의 각기 다른 운동을 포함하세요. 상세한 운동명, 세트, 횟수, 휴식시간까지 포함해주세요.
+10. ⚠️ 운동 다양성 확보: 최근 수행한 운동과 유사한 운동은 피하고, 새로운 운동 변형이나 다른 각도의 운동을 추천하세요.
 
 [근육 라벨 목록]
 아래 목록에 포함된 근육명만 사용하여 muscle_balance.overworked, muscle_balance.underworked, next_target_muscles 항목을 구성하세요.
