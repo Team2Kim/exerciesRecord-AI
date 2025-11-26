@@ -1421,6 +1421,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         profile_data: Optional[Dict[str, str]] = None,
         per_day: int = 4,
         exercise_diversity: Optional[Dict[str, Any]] = None,
+        excluded_exercise_ids: Optional[Set[int]] = None,
     ) -> List[Dict[str, Any]]:
         """
         LLM이 생성한 RAG 쿼리를 사용하여 운동을 검색합니다.
@@ -1492,6 +1493,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 if normalized_id in seen_ids:
                     continue
                 
+                # 제외할 운동 ID 확인
+                if excluded_exercise_ids and normalized_id in excluded_exercise_ids:
+                    continue
+                
                 # 타겟 근육과 일치하는지 확인
                 if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
                     continue
@@ -1536,6 +1541,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     continue
                 
                 if normalized_id in seen_ids:
+                    continue
+                
+                # 제외할 운동 ID 확인
+                if excluded_exercise_ids and normalized_id in excluded_exercise_ids:
                     continue
                 
                 # 관련 근육과 일치하는지 확인 (더 넓은 범위)
@@ -1607,6 +1616,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     if normalized_id in seen_ids:
                         continue
                     
+                    # 제외할 운동 ID 확인
+                    if excluded_exercise_ids and normalized_id in excluded_exercise_ids:
+                        continue
+                        
                     normalized_meta = dict(meta)
                     normalized_meta["exercise_id"] = normalized_id
                     
@@ -1651,6 +1664,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                         continue
                     
                     if normalized_id in seen_ids:
+                        continue
+                    
+                    # 제외할 운동 ID 확인
+                    if excluded_exercise_ids and normalized_id in excluded_exercise_ids:
                         continue
                     
                     normalized_meta = dict(meta)
@@ -1835,6 +1852,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         if not self.exercise_rag:
             return aggregated_ids, collected_sources
 
+        # 1단계: 모든 day의 운동을 먼저 수집 (exercise_id, score, day_index 저장)
+        day_exercise_data: List[Tuple[int, Dict[str, Any], float]] = []  # (day_index, exercise, score)
+        day_index = 0
+        
         for day, targets, rag_query in prepared_items:
             if not targets:
                 # 타겟 근육이 없으면 fallback 근육 사용
@@ -1845,6 +1866,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 else:
                     day["exercises"] = []
                     print(f"[루틴 생성] ⚠️ Day {day.get('day', '?')}에 타겟 근육이 없고 fallback도 없어서 운동 없음")
+                    day_index += 1
                     continue
 
             # LLM이 생성한 RAG 쿼리 사용 (검증 후)
@@ -1855,50 +1877,140 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 per_day=4,
                 exercise_diversity=exercise_diversity,
             )
-            exercise_ids: List[int] = []
-
-            for exercise in day_exercises:
-                exercise_id = exercise.get("exercise_id")
-                if isinstance(exercise_id, int):
-                    aggregated_ids.append(exercise_id)
-                    exercise_ids.append(exercise_id)
-                collected_sources.append(
-                    {
-                        "score": exercise.get("score"),
-                        "metadata": exercise,
-                    }
-                )
-
+            
             # 운동이 없으면 재시도 (더 넓은 범위로)
-            if not exercise_ids:
+            if not day_exercises:
                 print(f"[루틴 생성] ⚠️ Day {day.get('day', '?')}에 운동이 없습니다. 재검색합니다.")
-                # 더 간단한 쿼리로 재검색
                 simple_query = f"{targets[0]} 운동" if targets else None
-                retry_exercises = self._search_day_exercises_with_llm_query(
+                day_exercises = self._search_day_exercises_with_llm_query(
                     targets=targets,
                     rag_query=simple_query,
                     profile_data=profile_data,
                     per_day=4,
                     exercise_diversity=exercise_diversity,
                 )
+            
+            # 각 운동을 day_index와 함께 저장
+            for exercise in day_exercises:
+                exercise_id = exercise.get("exercise_id")
+                if isinstance(exercise_id, int):
+                    score = exercise.get("score", 0.0) or 0.0
+                    day_exercise_data.append((day_index, exercise, float(score)))
+            
+            day_index += 1
+
+        # 2단계: 중복된 exercise_id를 찾아서 score가 가장 높은 day에만 남기기
+        exercise_id_to_days: Dict[int, List[Tuple[int, float]]] = {}  # exercise_id -> [(day_index, score), ...]
+        
+        for day_idx, exercise, score in day_exercise_data:
+            exercise_id = exercise.get("exercise_id")
+            if not isinstance(exercise_id, int):
+                continue
+            
+            if exercise_id not in exercise_id_to_days:
+                exercise_id_to_days[exercise_id] = []
+            exercise_id_to_days[exercise_id].append((day_idx, score))
+        
+        # 중복된 exercise_id에 대해 score가 가장 높은 day 결정
+        exercise_id_to_best_day: Dict[int, int] = {}  # exercise_id -> best_day_index
+        exercises_to_remove: Dict[int, Set[int]] = {}  # day_index -> set of exercise_ids to remove
+        
+        for exercise_id, day_scores in exercise_id_to_days.items():
+            if len(day_scores) > 1:  # 중복된 경우
+                # score가 가장 높은 day 찾기
+                best_day_idx, best_score = max(day_scores, key=lambda x: x[1])
+                exercise_id_to_best_day[exercise_id] = best_day_idx
                 
-                for exercise in retry_exercises:
+                # 다른 day에서는 제거
+                for day_idx, score in day_scores:
+                    if day_idx != best_day_idx:
+                        if day_idx not in exercises_to_remove:
+                            exercises_to_remove[day_idx] = set()
+                        exercises_to_remove[day_idx].add(exercise_id)
+                
+                print(f"[루틴 생성] 🔄 중복 운동 발견: exercise_id={exercise_id}, Day {best_day_idx}에 유지 (score={best_score:.3f}), 다른 day에서 제거")
+        
+        # 3단계: 각 day별로 최종 운동 목록 구성
+        day_index = 0
+        for day, targets, rag_query in prepared_items:
+            if not isinstance(day, dict):
+                day_index += 1
+                continue
+            
+            # 해당 day의 운동 목록 구성
+            day_exercise_ids: List[int] = []
+            day_exercises_dict: Dict[int, Dict[str, Any]] = {}  # exercise_id -> exercise data
+            
+            # 해당 day의 모든 운동 수집
+            for d_idx, exercise, score in day_exercise_data:
+                if d_idx == day_index:
                     exercise_id = exercise.get("exercise_id")
-                    if isinstance(exercise_id, int) and exercise_id not in exercise_ids:
+                    if isinstance(exercise_id, int):
+                        day_exercises_dict[exercise_id] = exercise
+            
+            # 제거할 운동 제외
+            if day_index in exercises_to_remove:
+                for exercise_id_to_remove in exercises_to_remove[day_index]:
+                    if exercise_id_to_remove in day_exercises_dict:
+                        del day_exercises_dict[exercise_id_to_remove]
+                        print(f"[루틴 생성] 🗑️ Day {day.get('day', '?')}에서 중복 운동 제거: exercise_id={exercise_id_to_remove}")
+            
+            # 최종 운동 목록 생성
+            for exercise_id, exercise_data in day_exercises_dict.items():
+                day_exercise_ids.append(exercise_id)
+                aggregated_ids.append(exercise_id)
+                collected_sources.append({
+                    "score": exercise_data.get("score"),
+                    "metadata": exercise_data,
+                })
+            
+            # 제거된 운동이 있으면 추가 검색으로 채우기
+            removed_count = len(exercises_to_remove.get(day_index, set()))
+            if removed_count > 0 and targets:
+                print(f"[루틴 생성] 🔍 Day {day.get('day', '?')}에 {removed_count}개 운동이 제거되어 추가 검색합니다.")
+                
+                # 제외할 exercise_id 목록
+                excluded_ids = set(day_exercise_ids)  # 이미 포함된 운동 제외
+                for other_day_idx in range(len(prepared_items)):
+                    if other_day_idx != day_index:
+                        # 다른 day의 운동도 제외 (중복 방지)
+                        for d_idx, exercise, score in day_exercise_data:
+                            if d_idx == other_day_idx:
+                                other_exercise_id = exercise.get("exercise_id")
+                                if isinstance(other_exercise_id, int):
+                                    excluded_ids.add(other_exercise_id)
+                
+                # 추가 검색 (제외할 운동 ID 전달)
+                additional_exercises = self._search_day_exercises_with_llm_query(
+                    targets=targets,
+                    rag_query=rag_query,
+                    profile_data=profile_data,
+                    per_day=removed_count,
+                    exercise_diversity=exercise_diversity,
+                    excluded_exercise_ids=excluded_ids,
+                )
+                
+                # 제외된 운동을 제외하고 추가
+                for exercise in additional_exercises:
+                    exercise_id = exercise.get("exercise_id")
+                    if isinstance(exercise_id, int) and exercise_id not in excluded_ids:
+                        day_exercise_ids.append(exercise_id)
                         aggregated_ids.append(exercise_id)
-                        exercise_ids.append(exercise_id)
-                        collected_sources.append(
-                            {
-                                "score": exercise.get("score"),
-                                "metadata": exercise,
-                            }
-                        )
+                        excluded_ids.add(exercise_id)  # 중복 방지
+                        collected_sources.append({
+                            "score": exercise.get("score"),
+                            "metadata": exercise,
+                        })
+                        
+                        if len(day_exercise_ids) >= 4:  # per_day 제한
+                            break
             
             # 최종적으로도 운동이 없으면 경고
-            if not exercise_ids:
+            if not day_exercise_ids:
                 print(f"[루틴 생성] ❌ Day {day.get('day', '?')}에 여전히 운동이 없습니다. 타겟 근육: {targets}")
             
-            day["exercises"] = exercise_ids
+            day["exercises"] = day_exercise_ids
+            day_index += 1
 
         return aggregated_ids, collected_sources
 
