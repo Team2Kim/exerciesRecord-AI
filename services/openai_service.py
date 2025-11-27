@@ -1584,18 +1584,61 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         
         print(f"[RAG 검색] 🔍 검증된 검색 쿼리: {validated_query}")
         
-        try:
-            top_k = 12  # 충분한 후보 확보
-            rag_results = self.exercise_rag.search(
-                validated_query,
-                top_k=top_k,
-                target_group_filter=filters["target_group_filter"],
-                exclude_target_groups=filters["exclude_target_groups"],
-                fitness_factor_filter=filters["fitness_factor_filter"],
-                exclude_fitness_factors=filters["exclude_fitness_factors"],
-            )
-        except Exception as exc:
-            print(f"[RAG 검색] ⚠️ 검색 실패: {exc}")
+        simple_query = f"{targets[0]} 운동" if targets else validated_query
+        search_attempts = [
+            {
+                "label": "정규 쿼리",
+                "query": validated_query,
+                "top_k": 12,
+                "overrides": {},
+            },
+            {
+                "label": "단순 쿼리",
+                "query": simple_query,
+                "top_k": 18,
+                "overrides": {},
+            },
+            {
+                "label": "완화 쿼리",
+                "query": simple_query,
+                "top_k": 24,
+                "overrides": {
+                    "allowed_target_groups": None,
+                    "exclude_target_groups": None,
+                    "target_group_filter": None,
+                },
+            },
+        ]
+
+        rag_results: List[Dict[str, Any]] = []
+        attempt_used = None
+        for attempt_idx, attempt in enumerate(search_attempts, start=1):
+            attempt_query = attempt["query"]
+            if not attempt_query:
+                continue
+
+            merged_filters = dict(filters)
+            merged_filters.update(attempt.get("overrides") or {})
+            try:
+                rag_results = self.exercise_rag.search(
+                    attempt_query.strip(),
+                    top_k=attempt.get("top_k", 12),
+                    target_group_filter=merged_filters.get("target_group_filter"),
+                    exclude_target_groups=merged_filters.get("exclude_target_groups"),
+                    fitness_factor_filter=merged_filters.get("fitness_factor_filter"),
+                    exclude_fitness_factors=merged_filters.get("exclude_fitness_factors"),
+                )
+            except Exception as exc:
+                print(f"[RAG 검색] ⚠️ 검색 실패({attempt['label']}): {exc}")
+                rag_results = []
+
+            if rag_results:
+                attempt_used = attempt["label"]
+                filters = merged_filters
+                print(f"[RAG 검색] ✅ {attempt_used} 시도에서 {len(rag_results)}개 후보 확보")
+                break
+        else:
+            print(f"[RAG 검색] ❌ 모든 시도에서 운동을 찾지 못했습니다.")
             return []
         
         # 타겟 근육과 일치하는 운동 필터링 (1차: 정확히 일치)
