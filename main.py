@@ -422,6 +422,7 @@ class ExerciseUpdateRequest(BaseModel):
     video_url: str = None
     image_url: str = None
     image_file_name: str = None
+    exercise_tool: str = None
 
 
 @app.get("/api/muscles")
@@ -1085,6 +1086,9 @@ async def exercise_admin_page():
                                 <div class="exercise-muscles">
                                     <strong>근육:</strong> ${musclesLabel}
                                 </div>
+                                <div class="exercise-muscles" style="margin-top: 4px;">
+                                    <strong>도구:</strong> ${ex.exercise_tool || '도구 정보 없음'}
+                                </div>
                             </div>
                             <div id="edit-mode-${ex.exercise_id}" class="edit-mode" style="display: none;">
                                 <label class="inline-edit-label">제목 (Title)</label>
@@ -1106,6 +1110,10 @@ async def exercise_admin_page():
                                 <label class="inline-edit-label">이미지 파일명 (Image File Name)</label>
                                 <input type="text" class="inline-edit-input" id="edit-image-filename-${ex.exercise_id}" 
                                        value="${(ex.image_file_name || '').replace(/"/g, '&quot;')}" placeholder="image.jpg">
+                                
+                                <label class="inline-edit-label">운동 도구 (Exercise Tool)</label>
+                                <input type="text" class="inline-edit-input" id="edit-exercise-tool-${ex.exercise_id}" 
+                                       value="${(ex.exercise_tool || '').replace(/"/g, '&quot;')}" placeholder="운동 도구를 입력하세요">
                                 
                                 <div class="edit-actions">
                                     <button type="button" class="save-btn" onclick="event.stopPropagation(); saveExercise(${ex.exercise_id})">💾 저장</button>
@@ -1191,13 +1199,15 @@ async def exercise_admin_page():
             const videoUrlInput = document.getElementById(`edit-video-url-${exerciseId}`);
             const imageUrlInput = document.getElementById(`edit-image-url-${exerciseId}`);
             const imageFileNameInput = document.getElementById(`edit-image-filename-${exerciseId}`);
+            const exerciseToolInput = document.getElementById(`edit-exercise-tool-${exerciseId}`);
             
             originalData[exerciseId] = {
                 title: titleInput.value,
                 standardTitle: standardTitleInput.value,
                 videoUrl: videoUrlInput.value,
                 imageUrl: imageUrlInput.value,
-                imageFileName: imageFileNameInput.value
+                imageFileName: imageFileNameInput.value,
+                exerciseTool: exerciseToolInput.value
             };
             
             card.classList.add('editing');
@@ -1226,6 +1236,7 @@ async def exercise_admin_page():
                 document.getElementById(`edit-video-url-${exerciseId}`).value = data.videoUrl;
                 document.getElementById(`edit-image-url-${exerciseId}`).value = data.imageUrl;
                 document.getElementById(`edit-image-filename-${exerciseId}`).value = data.imageFileName;
+                document.getElementById(`edit-exercise-tool-${exerciseId}`).value = data.exerciseTool || '';
                 delete originalData[exerciseId];
             }
             
@@ -1268,13 +1279,15 @@ async def exercise_admin_page():
             const videoUrl = document.getElementById(`edit-video-url-${exerciseId}`).value;
             const imageUrl = document.getElementById(`edit-image-url-${exerciseId}`).value;
             const imageFileName = document.getElementById(`edit-image-filename-${exerciseId}`).value;
+            const exerciseTool = document.getElementById(`edit-exercise-tool-${exerciseId}`).value;
             
             const updateData = {
                 title: title || null,
                 standard_title: standardTitle || null,
                 video_url: videoUrl || null,
                 image_url: imageUrl || null,
-                image_file_name: imageFileName || null
+                image_file_name: imageFileName || null,
+                exercise_tool: exerciseTool || null
             };
             
             // null 값 제거
@@ -1310,7 +1323,8 @@ async def exercise_admin_page():
                         standard_title: exerciseData.standard_title || standardTitle,
                         video_url: exerciseData.video_url || videoUrl,
                         image_url: exerciseData.image_url || imageUrl,
-                        image_file_name: exerciseData.image_file_name || imageFileName
+                        image_file_name: exerciseData.image_file_name || imageFileName,
+                        exercise_tool: exerciseData.exercise_tool || exerciseTool
                     });
                     
                     // 편집 모드 종료
@@ -1395,18 +1409,27 @@ async def exercise_admin_page():
                 }
             }
             
+            // 도구 정보 업데이트
+            const toolElements = viewMode.querySelectorAll('.exercise-muscles');
+            if (toolElements.length > 1 && data.exercise_tool !== undefined) {
+                const toolElement = toolElements[1];
+                toolElement.innerHTML = `<strong>도구:</strong> ${data.exercise_tool || '도구 정보 없음'}`;
+            }
+            
             // 편집 모드의 입력 필드도 업데이트 (다음 편집을 위해)
             const editTitleInput = document.getElementById(`edit-title-${exerciseId}`);
             const editStandardTitleInput = document.getElementById(`edit-standard-title-${exerciseId}`);
             const editVideoUrlInput = document.getElementById(`edit-video-url-${exerciseId}`);
             const editImageUrlInput = document.getElementById(`edit-image-url-${exerciseId}`);
             const editImageFileNameInput = document.getElementById(`edit-image-filename-${exerciseId}`);
+            const editExerciseToolInput = document.getElementById(`edit-exercise-tool-${exerciseId}`);
             
             if (editTitleInput) editTitleInput.value = data.title || '';
             if (editStandardTitleInput) editStandardTitleInput.value = data.standard_title || '';
             if (editVideoUrlInput) editVideoUrlInput.value = data.video_url || '';
             if (editImageUrlInput) editImageUrlInput.value = data.image_url || '';
             if (editImageFileNameInput) editImageFileNameInput.value = data.image_file_name || '';
+            if (editExerciseToolInput) editExerciseToolInput.value = data.exercise_tool || '';
         }
         
         function openVideoModal(videoUrl, title) {

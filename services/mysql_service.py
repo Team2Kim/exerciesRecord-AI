@@ -174,7 +174,8 @@ class MySQLService:
         standard_title: Optional[str] = None,
         video_url: Optional[str] = None,
         image_url: Optional[str] = None,
-        image_file_name: Optional[str] = None
+        image_file_name: Optional[str] = None,
+        exercise_tool: Optional[str] = None
     ) -> bool:
         """운동 정보 업데이트"""
         try:
@@ -201,6 +202,10 @@ class MySQLService:
             if image_file_name is not None:
                 updates.append("image_file_name = %s")
                 params.append(image_file_name)
+            
+            if exercise_tool is not None:
+                updates.append("exercise_tool = %s")
+                params.append(exercise_tool)
             
             if not updates:
                 return False
