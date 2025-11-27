@@ -69,6 +69,36 @@ MUSCLE_NAME_MAPPING: Dict[str, List[str]] = {
     "허리": ["큰허리근", "허리근", "허리네모근"],
 }
 
+# 운동 도구 표준 분류 키워드
+TOOL_CATEGORY_KEYWORDS: Dict[str, List[str]] = {
+    "맨몸": ["맨몸", "바디웨이트", "bodyweight", "체중", "무도구"],
+    "머신": ["머신", "machine", "케이블", "기구", "기계", "스미스", "프레스"],
+    "덤벨": ["덤벨", "dumbbell"],
+    "의자": ["의자", "chair", "벤치", "bench"],
+    "탄력밴드": ["탄력밴드", "밴드", "band", "resistance band", "튜빙"],
+    "짐볼": ["짐볼", "짐 볼", "gym ball", "stability ball", "fitness ball"],
+    "써클휠": ["써클휠", "wheel"],
+    "기타": [],
+    "줄넘기": ["줄넘기", "jump rope", "rope"],
+    "스텝박스": ["스텝박스", "step box", "stepbench", "스텝 박스"],
+    "써클링": ["써클링", "magic circle", "circle ring"],
+    "콘": ["콘", "cone"],
+    "공": ["공", "ball"],
+    "라켓": ["라켓", "racket"],
+    "훌라후프": ["훌라후프", "hula hoop"],
+    "자전거": ["자전거", "cycle", "bike", "stationary bike"],
+    "트레드밀": ["트레드밀", "treadmill"],
+    "아쿠아봉": ["아쿠아봉", "aqua stick"],
+    "바벨": ["바벨", "barbell"],
+    "원판": ["원판", "plate"],
+    "보슈볼": ["보수볼", "보슈볼", "bosu"],
+    "사다리": ["사다리", "ladder"],
+    "폼롤러": ["폼롤러", "foam roller", "foam-roller", "마사지 롤러", "스트레칭 롤러"],
+    "봉": ["봉", "stick", "body bar"],
+    "케틀벨": ["케틀벨", "kettlebell"],
+    "줄": ["줄", "rope trainer"],
+}
+
 
 def validate_and_map_muscles(muscle_names: List[str]) -> List[str]:
     """
@@ -171,16 +201,26 @@ class OpenAIService:
             "exclude_target_groups": None,
             "fitness_factor_filter": None,
             "exclude_fitness_factors": None,
+            "allowed_target_groups": None,
         }
 
         if not profile_data:
             return filters
 
         target_group = profile_data.get("targetGroup")
-        if target_group == "성인":
-            filters["exclude_target_groups"] = ["유소년", "노인"]
-        elif target_group:
-            filters["target_group_filter"] = target_group
+        if target_group:
+            valid_groups = ["유소년", "청소년", "성인", "어르신", "공통"]
+            if target_group in valid_groups:
+                if target_group == "공통":
+                    allowed = ["공통"]
+                else:
+                    allowed = [target_group, "공통"]
+                filters["allowed_target_groups"] = allowed
+                filters["exclude_target_groups"] = [
+                    group for group in valid_groups if group not in allowed
+                ] or None
+            else:
+                filters["target_group_filter"] = target_group
 
         fitness_factor = profile_data.get("fitnessFactorName")
         if fitness_factor:
@@ -204,6 +244,40 @@ class OpenAIService:
             profile_parts.append(profile_data["fitnessFactorName"])
 
         return " ".join(profile_parts).strip()
+
+    def _is_target_group_allowed(
+        self,
+        meta_group: Optional[str],
+        filters: Dict[str, Optional[Any]],
+    ) -> bool:
+        """필터 조건에 맞는 대상 그룹인지 확인"""
+        allowed = filters.get("allowed_target_groups")
+        if not allowed:
+            return True
+
+        normalized = meta_group.strip() if isinstance(meta_group, str) else None
+        if normalized:
+            return normalized in allowed
+
+        # 대상 그룹 정보가 없으면 공통으로 간주
+        return "공통" in allowed
+
+    def _normalize_tool_category(self, tool: Optional[str]) -> str:
+        """운동 도구명을 표준 카테고리로 정규화"""
+        if not tool:
+            return "기타"
+
+        normalized = tool.strip().lower()
+        if not normalized:
+            return "기타"
+
+        for category, keywords in TOOL_CATEGORY_KEYWORDS.items():
+            for keyword in keywords:
+                keyword_lower = keyword.lower()
+                if keyword_lower and keyword_lower in normalized:
+                    return category
+
+        return "기타"
 
     def _expand_muscle_aliases(self, muscle: str) -> List[str]:
         """특정 근육명과 연관된 다양한 명칭/세부 근육을 반환"""
@@ -1031,8 +1105,29 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 day_level_exercise_ids = []
                 if daily_details:
                     # LLM 분석 결과에서 운동 다양성 정보 추출 (운동 도구 정보 포함)
-                    pattern_analysis = parsed_response.get("pattern_analysis", {})
-                    exercise_diversity = pattern_analysis.get("exercise_diversity", {})
+                    pattern_analysis = parsed_response.get("pattern_analysis", {}) or {}
+                    exercise_diversity = pattern_analysis.get("exercise_diversity")
+                    if not isinstance(exercise_diversity, dict):
+                        exercise_diversity = {}
+                        pattern_analysis["exercise_diversity"] = exercise_diversity
+                    
+                    # 주간 일지에서 파악한 실제 도구 정보를 RAG에 전달
+                    top_equipment_from_logs = [
+                        entry.get("name")
+                        for entry in metrics.get("top_equipment", [])[:6]
+                        if entry.get("name")
+                    ]
+                    top_equipment_categories = [
+                        entry.get("name")
+                        for entry in metrics.get("top_equipment_categories", [])[:6]
+                        if entry.get("name")
+                    ]
+                    
+                    if top_equipment_from_logs:
+                        exercise_diversity.setdefault("preferred_equipment_from_logs", top_equipment_from_logs)
+                        exercise_diversity.setdefault("preferred_equipment", top_equipment_from_logs[:5])
+                    if top_equipment_categories:
+                        exercise_diversity.setdefault("preferred_equipment_categories", top_equipment_categories)
                     
                     (
                         day_level_exercise_ids,
@@ -1206,6 +1301,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 if ex_id is None:
                     continue
 
+                if not self._is_target_group_allowed(meta.get("target_group"), filters):
+                    continue
+
                 if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
                     continue
 
@@ -1312,6 +1410,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 if normalized_id in seen_ids:
                     continue
 
+                if not self._is_target_group_allowed(meta.get("target_group"), filters):
+                    continue
+
                 if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
                     continue
 
@@ -1384,16 +1485,38 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         
         # 3. 운동 도구 정보 확인 및 추가 (매우 중요!)
         if exercise_diversity:
-            preferred_equipment = exercise_diversity.get("preferred_equipment", [])
-            if preferred_equipment and isinstance(preferred_equipment, list):
-                # 쿼리에 운동 도구 키워드가 있는지 확인
-                equipment_keywords = ["머신", "기구", "덤벨", "바벨", "케이블", "스미스", "레그", "프레스", "체중", "매트"]
-                has_equipment = any(keyword in query_lower for keyword in equipment_keywords)
+            preferred_equipment_list: List[str] = []
+            raw_equipment = exercise_diversity.get("preferred_equipment")
+            if isinstance(raw_equipment, list):
+                preferred_equipment_list.extend([eq for eq in raw_equipment if isinstance(eq, str)])
+            
+            logs_equipment = exercise_diversity.get("preferred_equipment_from_logs")
+            if isinstance(logs_equipment, list):
+                for item in logs_equipment:
+                    if isinstance(item, str) and item not in preferred_equipment_list:
+                        preferred_equipment_list.append(item)
+            
+            category_equipment = exercise_diversity.get("preferred_equipment_categories")
+            if isinstance(category_equipment, list):
+                for item in category_equipment:
+                    if isinstance(item, str) and item not in preferred_equipment_list:
+                        preferred_equipment_list.append(item)
+            
+            if preferred_equipment_list:
+                equipment_keywords = set()
+                for keywords in TOOL_CATEGORY_KEYWORDS.values():
+                    for keyword in keywords:
+                        if keyword:
+                            equipment_keywords.add(keyword.lower())
+                equipment_keywords.update(
+                    item.lower() for item in preferred_equipment_list if isinstance(item, str)
+                )
+                has_equipment = any(
+                    keyword and keyword in query_lower for keyword in equipment_keywords
+                )
                 
-                if not has_equipment and preferred_equipment:
-                    # 사용자가 선호하는 운동 도구를 쿼리에 추가
-                    # 가장 많이 사용한 도구를 우선적으로 추가
-                    primary_equipment = preferred_equipment[0] if preferred_equipment else ""
+                if not has_equipment and preferred_equipment_list:
+                    primary_equipment = preferred_equipment_list[0]
                     if primary_equipment:
                         query = f"{query} {primary_equipment}".strip()
                         print(f"[RAG 쿼리 검증] ✅ 운동 도구 정보 추가: {primary_equipment}")
@@ -1498,6 +1621,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     continue
                 
                 # 타겟 근육과 일치하는지 확인
+                if not self._is_target_group_allowed(meta.get("target_group"), filters):
+                    continue
+
                 if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
                     continue
                 
@@ -1548,6 +1674,9 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     continue
                 
                 # 관련 근육과 일치하는지 확인 (더 넓은 범위)
+                if not self._is_target_group_allowed(meta.get("target_group"), filters):
+                    continue
+
                 exercise_muscles = meta.get("muscles", [])
                 if isinstance(exercise_muscles, str):
                     exercise_muscles = [m.strip() for m in exercise_muscles.split(",") if m.strip()]
@@ -1750,6 +1879,21 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     query_parts.append("새로운")
                 if "변형" in recommended_variation:
                     query_parts.append("변형")
+            
+            preferred_equipment = exercise_diversity.get("preferred_equipment")
+            if not preferred_equipment:
+                preferred_equipment = exercise_diversity.get("preferred_equipment_from_logs")
+            if not preferred_equipment:
+                preferred_equipment = exercise_diversity.get("preferred_equipment_categories")
+            
+            if preferred_equipment and isinstance(preferred_equipment, list):
+                primary_equipment = next(
+                    (item for item in preferred_equipment if isinstance(item, str) and item.strip()),
+                    None,
+                )
+                if primary_equipment:
+                    query_parts.append(primary_equipment.strip())
+                    print(f"[RAG 쿼리] 운동 도구 정보 반영: {primary_equipment.strip()}")
         
         # 6. 회복 상태에 따른 강도 조절
         if recovery_status:
@@ -2269,6 +2413,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         body_part_counts: Dict[str, int] = {}
         muscle_counts: Dict[str, int] = {}
         equipment_counts: Dict[str, int] = {}  # 운동 도구 사용 횟수
+        tool_category_counts: Dict[str, int] = {
+            category: 0 for category in TOOL_CATEGORY_KEYWORDS.keys()
+        }
+        if "기타" not in tool_category_counts:
+            tool_category_counts["기타"] = 0
         total_minutes = 0
         active_days = 0
 
@@ -2306,6 +2455,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 exercise_tool = exercise_info.get("exerciseTool", "")
                 if exercise_tool and exercise_tool.strip() and exercise_tool != "정보 없음":
                     equipment_counts[exercise_tool] = equipment_counts.get(exercise_tool, 0) + 1
+                    normalized_tool = self._normalize_tool_category(exercise_tool)
+                    tool_category_counts[normalized_tool] = tool_category_counts.get(normalized_tool, 0) + 1
 
         top_muscles = [
             {"name": name, "count": count}
@@ -2315,6 +2466,12 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         top_equipment = [
             {"name": name, "count": count}
             for name, count in sorted(equipment_counts.items(), key=lambda item: item[1], reverse=True)
+        ]
+        
+        top_equipment_categories = [
+            {"name": name, "count": count}
+            for name, count in sorted(tool_category_counts.items(), key=lambda item: item[1], reverse=True)
+            if count > 0
         ]
 
         # 주간 분석이므로 총 일수는 항상 7일로 고정
@@ -2327,7 +2484,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             "intensity_counts": intensity_counts,
             "body_part_counts": body_part_counts,
             "top_muscles": top_muscles,
-            "top_equipment": top_equipment  # 운동 도구 정보 추가
+            "top_equipment": top_equipment,  # 운동 도구 정보 추가
+            "top_equipment_categories": top_equipment_categories,
         }
 
     def _infer_body_part(self, exercise_info: Dict[str, Any]) -> str:
@@ -2395,6 +2553,10 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         top_equipment_summary = ", ".join(
             f"{entry['name']} {entry['count']}회" for entry in metrics.get("top_equipment", [])[:6]
         ) if metrics.get("top_equipment") else "데이터 없음"
+        
+        top_equipment_category_summary = ", ".join(
+            f"{entry['name']} {entry['count']}회" for entry in metrics.get("top_equipment_categories", [])[:6]
+        ) if metrics.get("top_equipment_categories") else "데이터 없음"
 
         prompt = f"""
 사용자의 최근 7일 운동 기록을 분석하고, 패턴을 파악해 적절한 루틴을 제안해주세요.
@@ -2439,6 +2601,8 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
 - 주요 운동 부위: {body_part_summary}
 - 상위 근육 사용: {top_muscle_summary}
 - 주요 사용 운동 도구: {top_equipment_summary} (⚠️ 이 정보를 반드시 분석에 반영하세요)
+- 주요 사용 운동 도구: {top_equipment_summary} (⚠️ 이 정보를 반드시 분석에 반영하세요)
+- 도구 분류별 사용: {top_equipment_category_summary}
 - 휴식일 수: {metrics['rest_days']}일
 
 [분석 및 추천 지침]
