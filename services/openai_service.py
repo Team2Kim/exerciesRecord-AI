@@ -1598,16 +1598,6 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 "top_k": 18,
                 "overrides": {},
             },
-            {
-                "label": "완화 쿼리",
-                "query": simple_query,
-                "top_k": 24,
-                "overrides": {
-                    "allowed_target_groups": None,
-                    "exclude_target_groups": None,
-                    "target_group_filter": None,
-                },
-            },
         ]
 
         rag_results: List[Dict[str, Any]] = []
