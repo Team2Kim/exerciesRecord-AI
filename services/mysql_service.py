@@ -101,7 +101,8 @@ class MySQLService:
                     e.image_url,
                     e.image_file_name,
                     e.description,
-                    e.muscles
+                    e.muscles,
+                    e.exercise_tool
                 FROM ex_muscles e
                 {where_clause}
                 ORDER BY e.exercise_id ASC
@@ -148,7 +149,8 @@ class MySQLService:
                     e.image_url,
                     e.image_file_name,
                     e.description,
-                    e.muscles
+                    e.muscles,
+                    e.exercise_tool
                 FROM ex_muscles e
                 WHERE e.exercise_id = %s
             """
@@ -162,6 +164,11 @@ class MySQLService:
                     ]
                 else:
                     result["muscles"] = []
+                exercise_tool_value = result.get("exercise_tool")
+                if exercise_tool_value:
+                    result["exercise_tool"] = exercise_tool_value.strip()
+                else:
+                    result["exercise_tool"] = None
             return result
         except Error as e:
             print(f"운동 조회 오류: {e}")
