@@ -1440,6 +1440,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         target_muscles: List[str],
         profile_data: Optional[Dict[str, str]] = None,
         exercise_diversity: Optional[Dict[str, Any]] = None,
+        enforce_equipment: bool = True,
     ) -> Tuple[bool, str]:
         """
         LLM이 생성한 RAG 쿼리를 검증하고 개선합니다.
@@ -1484,7 +1485,7 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             query_lower = query.lower()
         
         # 3. 운동 도구 정보 확인 및 추가 (매우 중요!)
-        if exercise_diversity:
+        if exercise_diversity and enforce_equipment:
             preferred_equipment_list: List[str] = []
             raw_equipment = exercise_diversity.get("preferred_equipment")
             if isinstance(raw_equipment, list):
@@ -1564,6 +1565,18 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         filters = self._build_rag_filter_options(profile_data)
         seen_ids: Set[int] = set()
         day_exercises: List[Dict[str, Any]] = []
+        MAX_DEBUG_LOGS = 5
+        debug_logs = {
+            "duplicate": 0,
+            "excluded": 0,
+            "target_group": 0,
+            "muscle": 0,
+        }
+
+        def log_debug(key: str, message: str) -> None:
+            if debug_logs.get(key, 0) < MAX_DEBUG_LOGS:
+                print(message)
+                debug_logs[key] = debug_logs.get(key, 0) + 1
         
         # LLM이 생성한 원본 쿼리 로그
         if rag_query:
@@ -1573,7 +1586,11 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
         
         # RAG 쿼리 검증 (운동 도구 정보 포함)
         is_valid, validated_query = self._validate_rag_query(
-            rag_query, targets, profile_data, exercise_diversity=exercise_diversity
+            rag_query,
+            targets,
+            profile_data,
+            exercise_diversity=exercise_diversity,
+            enforce_equipment=True,
         )
         
         if not is_valid or not validated_query:
@@ -1591,12 +1608,21 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                 "query": validated_query,
                 "top_k": 12,
                 "overrides": {},
+                "enforce_equipment": True,
             },
             {
                 "label": "단순 쿼리",
                 "query": simple_query,
                 "top_k": 18,
                 "overrides": {},
+                "enforce_equipment": True,
+            },
+            {
+                "label": "도구 없는 쿼리",
+                "query": simple_query,
+                "top_k": 20,
+                "overrides": {},
+                "enforce_equipment": False,
             },
         ]
 
@@ -1610,6 +1636,18 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
             merged_filters = dict(filters)
             merged_filters.update(attempt.get("overrides") or {})
             try:
+                if not attempt.get("enforce_equipment", True):
+                    print(f"[RAG 검색] ⚠️ 도구 제약을 제거하고 검색합니다 ({attempt['label']})")
+                # 재검증 시 enforce 옵션 적용
+                temp_valid, temp_validated_query = self._validate_rag_query(
+                    attempt_query,
+                    targets,
+                    profile_data,
+                    exercise_diversity=exercise_diversity,
+                    enforce_equipment=attempt.get("enforce_equipment", True),
+                )
+                if temp_valid and temp_validated_query:
+                    attempt_query = temp_validated_query
                 rag_results = self.exercise_rag.search(
                     attempt_query.strip(),
                     top_k=attempt.get("top_k", 12),
@@ -1647,17 +1685,21 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     continue
                 
                 if normalized_id in seen_ids:
+                    log_debug("duplicate", f"[RAG 필터] 중복 운동 제외 (id={normalized_id})")
                     continue
                 
                 # 제외할 운동 ID 확인
                 if excluded_exercise_ids and normalized_id in excluded_exercise_ids:
+                    log_debug("excluded", f"[RAG 필터] 이미 추천된 운동 제외 (id={normalized_id})")
                     continue
                 
                 # 타겟 근육과 일치하는지 확인
                 if not self._is_target_group_allowed(meta.get("target_group"), filters):
+                    log_debug("target_group", f"[RAG 필터] 대상 그룹 불일치 (id={normalized_id}, target_group={meta.get('target_group')})")
                     continue
 
                 if not self._metadata_matches_muscle(meta.get("muscles"), alias_tokens):
+                    log_debug("muscle", f"[RAG 필터] 근육 불일치 (id={normalized_id}, muscles={meta.get('muscles')})")
                     continue
                 
                 normalized_meta = dict(meta)
@@ -1700,14 +1742,17 @@ next_workout에서 추천하는 훈련과 next_target_muscles에 포함된 근�
                     continue
                 
                 if normalized_id in seen_ids:
+                    log_debug("duplicate", f"[RAG 필터-확장] 중복 운동 제외 (id={normalized_id})")
                     continue
                 
                 # 제외할 운동 ID 확인
                 if excluded_exercise_ids and normalized_id in excluded_exercise_ids:
+                    log_debug("excluded", f"[RAG 필터-확장] 이미 추천된 운동 제외 (id={normalized_id})")
                     continue
                 
                 # 관련 근육과 일치하는지 확인 (더 넓은 범위)
                 if not self._is_target_group_allowed(meta.get("target_group"), filters):
+                    log_debug("target_group", f"[RAG 필터-확장] 대상 그룹 불일치 (id={normalized_id}, target_group={meta.get('target_group')})")
                     continue
 
                 exercise_muscles = meta.get("muscles", [])
